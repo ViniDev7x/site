@@ -10,7 +10,7 @@ Este pacote contém o código atualizado da plataforma Nexora. Ele ainda não es
 4. Execute `npm ci` e aguarde terminar.
 5. Execute `npm run dev` e mantenha o terminal aberto.
 6. Abra no navegador o endereço que aparece na linha `Local` do Vite.
-7. Use a demonstração para navegar e testar a calculadora e o wizard. Ela simula pagamentos e criação de serviços: não cria servidores reais nem envia e-mails externos.
+7. No wizard, o plano inicial é Free (sem cartão); para testar preços e cupons, escolha um plano pago. A renovação Free é manual em sete dias. Veja `PLANOS-E-CUPONS.md`. Use a demonstração para navegar e testar a calculadora e o wizard. Ela simula pagamentos e criação de serviços: não cria servidores reais nem envia e-mails externos.
 8. Para encerrar, pressione **Ctrl+C** no terminal.
 
 Se a porta estiver ocupada, use o endereço que o terminal indicar. Não abra `index.html` com duplo clique: a aplicação precisa do frontend e da API iniciados pelo comando acima.

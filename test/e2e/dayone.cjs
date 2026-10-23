@@ -1,27 +1,287 @@
-const {chromium}=require('playwright');
-const {mkdtemp,mkdir,rm}=require('node:fs/promises');
-const {tmpdir}=require('node:os');const {join}=require('node:path');
-(async()=>{
- const {createApplication}=await import('../../server/app.js');const {createServer}=await import('vite');
- const dir=await mkdtemp(join(tmpdir(),'nexora-dayone-browser-'));const sent=[];let browser,apiApp,vite;
- try{
- apiApp=createApplication({production:false,dataDir:dir,runtime:{requireLogin:true,origin:'http://localhost',appKey:'a'.repeat(64),resendKey:'re_e2e_fixture',resendWebhook:'whsec_fixture',mailFrom:'no-reply@example.com',operator:'Operador E2E (fictício)',taxId:'00.000.000/0001-00',address:'Endereço de teste',supportEmail:'support@example.com',privacyEmail:'privacy@example.com'},mailClient:{emails:{send:async payload=>{sent.push(payload);return {data:{id:'email_'+sent.length}}}},domains:{list:async()=>({data:{data:[]}})}}});
- await new Promise(r=>apiApp.server.listen(0,'127.0.0.1',r));
- vite=await createServer({configFile:false,root:process.cwd(),cacheDir:join(dir,'vitecache'),server:{host:'127.0.0.1',port:0,proxy:{'/api':{target:`http://127.0.0.1:${apiApp.server.address().port}`,changeOrigin:false}}}});await vite.listen();
- const base=`http://127.0.0.1:${vite.httpServer.address().port}`;apiApp.config.origin=base;
- browser=await chromium.launch({...(process.env.CHROMIUM_EXECUTABLE?{executablePath:process.env.CHROMIUM_EXECUTABLE}:{}),headless:true,args:['--no-sandbox']});
- const context=await browser.newContext({viewport:{width:1440,height:1000}});const page=await context.newPage();const errors=[];page.on('pageerror',e=>errors.push(e.message));
- await page.goto(base);await page.getByRole('heading',{name:/Seu próximo projeto/}).waitFor();await page.getByText('Beta · acesso antecipado',{exact:true}).waitFor();
- if(await page.getByRole('button',{name:'Afiliados',exact:true}).count())throw Error('Growth features are visible');
- await page.getByRole('button',{name:'Criar minha conta'}).click();await page.getByLabel('Nome',{exact:true}).fill('Cliente de Teste');await page.getByLabel('E-mail',{exact:true}).fill('browser@example.com');await page.getByLabel('Senha',{exact:true}).fill('senha-segura-e-exclusiva-123');await page.getByLabel(/Li e aceito/).check();await page.getByRole('button',{name:'Criar conta',exact:true}).click();await page.getByText(/enviaremos um link de confirmação/).waitFor();
- await apiApp.mail.flush();const verification=sent.find(m=>m.subject.includes('Confirme'));if(!verification)throw Error('Verification email was not queued');
- const link=verification.text.match(/http:\/\/[^\s]+/)[0];await page.goto(link);await page.getByRole('button',{name:'Confirmar meu e-mail'}).click();await page.getByText('E-mail confirmado. Você já pode entrar.').waitFor();
- await page.getByLabel('E-mail',{exact:true}).fill('browser@example.com');await page.getByLabel('Senha',{exact:true}).fill('senha-segura-e-exclusiva-123');await page.getByRole('button',{name:'Entrar na conta'}).click();await page.getByRole('heading',{name:'Seus projetos, em um lugar.'}).waitFor();
- await page.getByRole('button',{name:'Contratar plano',exact:true}).click();await page.getByRole('button',{name:'Sites Sua ideia no ar.'}).click();await page.getByRole('button',{name:'Continuar',exact:true}).click();await page.getByRole('button',{name:'Estático',exact:true}).click();if(await page.getByText('Template do marketplace',{exact:true}).count())throw Error('Marketplace in checkout');await page.getByRole('button',{name:'Continuar',exact:true}).click();await page.getByPlaceholder('Meu projeto incrível').fill('Site dia um');await page.getByRole('button',{name:'Continuar',exact:true}).click();await page.getByLabel('Ciclo de cobrança').selectOption('annual');await page.getByText('Desconto de 20% no ciclo').waitFor();await page.getByRole('button',{name:'Continuar',exact:true}).click();for(const href of ['/termos','/privacidade','/reembolsos'])if(!(await page.locator(`.wizard a[href="${href}"]`).count()))throw Error('Missing legal checkout link '+href);await page.getByLabel(/Li e aceito os/).check();await page.getByRole('button',{name:'Criar demonstração'}).click();await page.getByRole('heading',{name:'Site dia um',exact:true}).waitFor();await page.getByRole('heading',{name:'Acesso ao serviço'}).waitFor();
- await page.getByRole('button',{name:'Suporte',exact:true}).click();await page.getByRole('link',{name:'Enviar e-mail ao suporte'}).waitFor();if(await page.getByPlaceholder('Conte o que está acontecendo...').count())throw Error('AI support still present');
- await page.setViewportSize({width:390,height:844});if(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth)){console.log(await page.evaluate(()=>Array.from(document.querySelectorAll('body *')).map(el=>({tag:el.tagName,class:el.className,right:el.getBoundingClientRect().right,width:el.getBoundingClientRect().width})).filter(el=>el.right>innerWidth+1).slice(0,15)));throw Error('Mobile horizontal overflow')};await mkdir('test-results',{recursive:true});await page.screenshot({path:'test-results/dayone-mobile.png',fullPage:true});
- await page.goto(base+'/privacidade');await page.getByRole('heading',{name:'Política de Privacidade e LGPD',exact:true}).waitFor();await page.getByRole('heading',{name:'6. Seus direitos',exact:true}).waitFor();await page.goto(base+'/pagina-inexistente');await page.getByRole('heading',{name:'Este endereço não existe.',exact:true}).waitFor();
- if(errors.length)throw Error(errors.join('\n'));
- console.log('PASS: real signup/login/email verification, legal consent, basic checkout/provisioning (development simulation), service panel, contact support, legal pages, custom 404 and mobile. No JS errors. External delivery and live purchase NOT tested.');
- }finally{if(browser)await browser.close();if(vite)await vite.close();if(apiApp)await apiApp.close();await rm(dir,{recursive:true,force:true})}
-})().catch(e=>{console.error(e);process.exitCode=1});
+const { chromium } = require("playwright");
+const { mkdtemp, mkdir, rm } = require("node:fs/promises");
+const { tmpdir } = require("node:os");
+const { join } = require("node:path");
+(async () => {
+  const { createApplication } = await import("../../server/app.js");
+  const { createServer } = await import("vite");
+  const dir = await mkdtemp(join(tmpdir(), "nexora-dayone-browser-"));
+  const sent = [];
+  let browser, apiApp, vite;
+  try {
+    apiApp = createApplication({
+      production: false,
+      dataDir: dir,
+      adminToken: "browser-admin-fixture",
+      runtime: {
+        requireLogin: true,
+        origin: "http://localhost",
+        appKey: "a".repeat(64),
+        resendKey: "re_e2e_fixture",
+        resendWebhook: "whsec_fixture",
+        mailFrom: "no-reply@example.com",
+        operator: "Operador E2E (fictício)",
+        taxId: "00.000.000/0001-00",
+        address: "Endereço de teste",
+        supportEmail: "support@example.com",
+        privacyEmail: "privacy@example.com",
+      },
+      mailClient: {
+        emails: {
+          send: async (payload) => {
+            sent.push(payload);
+            return { data: { id: "email_" + sent.length } };
+          },
+        },
+        domains: { list: async () => ({ data: { data: [] } }) },
+      },
+    });
+    await new Promise((r) => apiApp.server.listen(0, "127.0.0.1", r));
+    vite = await createServer({
+      configFile: false,
+      root: process.cwd(),
+      cacheDir: join(dir, "vitecache"),
+      server: {
+        host: "127.0.0.1",
+        port: 0,
+        proxy: {
+          "/api": {
+            target: `http://127.0.0.1:${apiApp.server.address().port}`,
+            changeOrigin: false,
+          },
+        },
+      },
+    });
+    await vite.listen();
+    const base = `http://127.0.0.1:${vite.httpServer.address().port}`;
+    apiApp.config.origin = base;
+    browser = await chromium.launch({
+      ...(process.env.CHROMIUM_EXECUTABLE
+        ? { executablePath: process.env.CHROMIUM_EXECUTABLE }
+        : {}),
+      headless: true,
+      args: ["--no-sandbox"],
+    });
+    const context = await browser.newContext({
+      viewport: { width: 1440, height: 1000 },
+    });
+    const page = await context.newPage();
+    const errors = [];
+    page.on("pageerror", (e) => errors.push(e.message));
+    await page.goto(base);
+    await page.getByRole("heading", { name: /Seu próximo projeto/ }).waitFor();
+    await page.getByText("Beta · acesso antecipado", { exact: true }).waitFor();
+    if (
+      await page.getByRole("button", { name: "Afiliados", exact: true }).count()
+    )
+      throw Error("Growth features are visible");
+    await page.getByRole("button", { name: "Criar minha conta" }).click();
+    await page.getByLabel("Nome", { exact: true }).fill("Cliente de Teste");
+    await page
+      .getByLabel("E-mail", { exact: true })
+      .fill("browser@example.com");
+    await page
+      .getByLabel("Senha", { exact: true })
+      .fill("senha-segura-e-exclusiva-123");
+    await page.getByLabel(/Li e aceito/).check();
+    await page
+      .getByRole("button", { name: "Criar conta", exact: true })
+      .click();
+    await page.getByText(/enviaremos um link de confirmação/).waitFor();
+    await apiApp.mail.flush();
+    const verification = sent.find((m) => m.subject.includes("Confirme"));
+    if (!verification) throw Error("Verification email was not queued");
+    const link = verification.text.match(/http:\/\/[^\s]+/)[0];
+    await page.goto(link);
+    await page.getByRole("button", { name: "Confirmar meu e-mail" }).click();
+    await page.getByText("E-mail confirmado. Você já pode entrar.").waitFor();
+    await page
+      .getByLabel("E-mail", { exact: true })
+      .fill("browser@example.com");
+    await page
+      .getByLabel("Senha", { exact: true })
+      .fill("senha-segura-e-exclusiva-123");
+    await page.getByRole("button", { name: "Entrar na conta" }).click();
+    await page
+      .getByRole("heading", { name: "Seus projetos, em um lugar." })
+      .waitFor();
+    await page
+      .getByRole("button", { name: "Contratar plano", exact: true })
+      .click();
+    await page.getByRole("button", { name: "Sites Sua ideia no ar." }).click();
+    await page.getByRole("button", { name: "Continuar", exact: true }).click();
+    await page.getByRole("button", { name: "Estático", exact: true }).click();
+    if (
+      await page.getByText("Template do marketplace", { exact: true }).count()
+    )
+      throw Error("Marketplace in checkout");
+    await page.getByRole("button", { name: "Continuar", exact: true }).click();
+    await page.getByPlaceholder("Meu projeto incrível").fill("Site dia um");
+    await page.getByRole("button", { name: "Continuar", exact: true }).click();
+    await page.getByRole("button", { name: /^Starter 6 GB RAM/ }).click();
+    await page.getByLabel("Ciclo de cobrança").selectOption("annual");
+    await page.getByText("Desconto de 20% no ciclo").waitFor();
+    await page.getByRole("button", { name: "Continuar", exact: true }).click();
+    for (const href of ["/termos", "/privacidade", "/reembolsos"])
+      if (!(await page.locator(`.wizard a[href="${href}"]`).count()))
+        throw Error("Missing legal checkout link " + href);
+    await page.getByLabel(/Li e aceito os/).check();
+    await page.getByRole("button", { name: "Criar demonstração" }).click();
+    await page
+      .getByRole("heading", { name: "Site dia um", exact: true })
+      .waitFor();
+    await page.getByRole("heading", { name: "Acesso ao serviço" }).waitFor();
+    // Free creation without payment, then administration and a coupon-backed upgrade.
+    await page
+      .getByRole("button", { name: "Visão geral", exact: true })
+      .click();
+    await page
+      .getByRole("button", { name: "Contratar plano", exact: true })
+      .click();
+    await page.getByRole("button", { name: "Continuar", exact: true }).click();
+    await page.getByRole("button", { name: "Continuar", exact: true }).click();
+    await page.getByPlaceholder("Meu projeto incrível").fill("Free browser");
+    await page.getByRole("button", { name: "Continuar", exact: true }).click();
+    if (!(await page.getByLabel("Memória RAM", { exact: true }).isDisabled()))
+      throw Error("Free RAM is editable");
+    await page.getByRole("button", { name: "Continuar", exact: true }).click();
+    await page.getByLabel("CPF do titular").fill("529.982.247-25");
+    await page.getByLabel(/Li e aceito os/).check();
+    await page.getByRole("button", { name: "Criar Free sem cartão" }).click();
+    await page
+      .getByRole("heading", { name: "Free browser", exact: true })
+      .waitFor();
+    if (
+      !(await page
+        .getByLabel("Domínio customizado", { exact: true })
+        .isDisabled())
+    )
+      throw Error("Free custom domain is enabled");
+    await page.getByRole("button", { name: "Renovar Free por 7 dias" }).click();
+    await page.getByText(/Free renovado/).waitFor();
+    await page.getByRole("button", { name: "Operação", exact: true }).click();
+    await page.getByLabel("Token administrativo").fill("browser-admin-fixture");
+    await page.getByRole("button", { name: "Autenticar", exact: true }).click();
+    await page
+      .getByRole("heading", { name: "Cupons de desconto", exact: true })
+      .waitFor();
+    await page.getByLabel("Código do cupom", { exact: true }).fill("BROWSER20");
+    await page.getByLabel("Valor do desconto", { exact: true }).fill("20");
+    await page
+      .getByLabel("Validade do cupom", { exact: true })
+      .fill("2099-12-31T23:59");
+    await page
+      .getByRole("button", { name: "Criar cupom", exact: true })
+      .click();
+    await page
+      .getByRole("button", { name: "Editar BROWSER20", exact: true })
+      .waitFor();
+    await page
+      .getByRole("button", { name: "Visão geral", exact: true })
+      .click();
+    await page
+      .locator(".service-card")
+      .filter({
+        has: page.getByRole("heading", { name: "Free browser", exact: true }),
+      })
+      .getByRole("button", { name: "Abrir serviço" })
+      .click();
+    const beforeAddress = await page
+      .locator(".address-card code")
+      .textContent();
+    await page
+      .getByRole("button", { name: "Fazer upgrade", exact: true })
+      .click();
+    await page.getByRole("button", { name: "Continuar", exact: true }).click();
+    await page
+      .getByLabel("Cupom de desconto", { exact: true })
+      .fill("BROWSER20");
+    await page
+      .getByRole("button", { name: "Aplicar cupom", exact: true })
+      .click();
+    await page
+      .getByText("Cupom BROWSER20 · todas as renovações", { exact: true })
+      .waitFor();
+    await page.getByLabel(/Li e aceito os/).check();
+    await page.getByRole("button", { name: "Criar demonstração" }).click();
+    await page
+      .getByRole("heading", { name: "Plano Starter", exact: true })
+      .waitFor();
+    if (
+      (await page.locator(".address-card code").textContent()) !== beforeAddress
+    )
+      throw Error("Upgrade changed service address");
+    if (
+      await page.getByLabel("Domínio customizado", { exact: true }).isDisabled()
+    )
+      throw Error("Paid domain remains locked");
+    await page
+      .getByLabel("Domínio customizado", { exact: true })
+      .fill("clan.example.com");
+    await page
+      .getByLabel("Agendamento de backup", { exact: true })
+      .selectOption("daily");
+    await page
+      .getByRole("button", { name: "Salvar configurações", exact: true })
+      .click();
+    await page.getByText("Configurações aplicadas.", { exact: true }).waitFor();
+    await page.getByRole("button", { name: "Suporte", exact: true }).click();
+    await page
+      .getByRole("link", { name: "Enviar e-mail ao suporte" })
+      .waitFor();
+    if (await page.getByPlaceholder("Conte o que está acontecendo...").count())
+      throw Error("AI support still present");
+    await page.setViewportSize({ width: 390, height: 844 });
+    if (
+      await page.evaluate(
+        () => document.documentElement.scrollWidth > innerWidth,
+      )
+    ) {
+      console.log(
+        await page.evaluate(() =>
+          Array.from(document.querySelectorAll("body *"))
+            .map((el) => ({
+              tag: el.tagName,
+              class: el.className,
+              right: el.getBoundingClientRect().right,
+              width: el.getBoundingClientRect().width,
+            }))
+            .filter((el) => el.right > innerWidth + 1)
+            .slice(0, 15),
+        ),
+      );
+      throw Error("Mobile horizontal overflow");
+    }
+    await mkdir("test-results", { recursive: true });
+    await page.screenshot({
+      path: "test-results/dayone-mobile.png",
+      fullPage: true,
+    });
+    await page.goto(base + "/privacidade");
+    await page
+      .getByRole("heading", {
+        name: "Política de Privacidade e LGPD",
+        exact: true,
+      })
+      .waitFor();
+    await page
+      .getByRole("heading", { name: "6. Seus direitos", exact: true })
+      .waitFor();
+    await page.goto(base + "/pagina-inexistente");
+    await page
+      .getByRole("heading", { name: "Este endereço não existe.", exact: true })
+      .waitFor();
+    if (errors.length) throw Error(errors.join("\n"));
+    console.log(
+      "PASS: signup/login, paid and Free creation, renewal, admin coupon, upgrade with preserved address, unlocked settings, legal pages and mobile (development simulation). No JS errors. External delivery and live purchase NOT tested.",
+    );
+  } finally {
+    if (browser) await browser.close();
+    if (vite) await vite.close();
+    if (apiApp) await apiApp.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+})().catch((e) => {
+  console.error(e);
+  process.exitCode = 1;
+});

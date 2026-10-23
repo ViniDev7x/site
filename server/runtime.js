@@ -1,17 +1,20 @@
 import { isAbsolute } from "node:path";
-import { contactDefaults } from '../shared/contact.js';
-import { validTaxId } from './tax-id.js';
-export const LEGAL_VERSION = "2026-10-23";
+import { contactDefaults } from "../shared/contact.js";
+import { validTaxId } from "./tax-id.js";
+export const LEGAL_VERSION = "2026-10-23-v2";
 export function loadRuntime(env = process.env, overrides = {}) {
   const production = overrides.production ?? env.NODE_ENV === "production";
   const c = {
     production,
+    serviceDomain: env.PLATFORM_SERVICE_DOMAIN || "",
     requireLogin: production || env.REQUIRE_LOGIN === "true",
     origin: env.APP_ORIGIN || "",
     dataDir: env.DATA_DIR || "",
     supportEmail: env.SUPPORT_EMAIL || contactDefaults.supportEmail,
-    privacyEmail: env.PRIVACY_EMAIL || env.SUPPORT_EMAIL || contactDefaults.privacyEmail,
-    discord: env.SUPPORT_DISCORD_URL || "",discordUser:contactDefaults.discordUser,
+    privacyEmail:
+      env.PRIVACY_EMAIL || env.SUPPORT_EMAIL || contactDefaults.privacyEmail,
+    discord: env.SUPPORT_DISCORD_URL || "",
+    discordUser: contactDefaults.discordUser,
     operator: env.OPERATOR_NAME || "",
     taxId: env.OPERATOR_TAX_ID || "",
     address: env.OPERATOR_ADDRESS || "",
@@ -87,6 +90,10 @@ export function configIssues(c) {
     32, "NEXORA_ADMIN_TOKEN (mínimo 32 caracteres)");
   require(c.adminEmails.length > 0 &&
     c.adminEmails.every(email), "ADMIN_EMAILS");
+  if (c.serviceDomain)
+    require(/^(?!.*\.invalid$)[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?\.[a-z]{2,}$/i.test(
+      c.serviceDomain,
+    ), "PLATFORM_SERVICE_DOMAIN (domínio real de serviços)");
   if (c.discord)
     require(/^https:\/\/(discord\.gg|discord\.com)\/[^\s]+$/.test(
       c.discord,
@@ -108,7 +115,8 @@ export function publicRuntime(c) {
     publicCheckout: c.publicCheckout,
     supportEmail: c.supportEmail,
     privacyEmail: c.privacyEmail,
-    discord: c.discord,discordUser:c.discordUser,
+    discord: c.discord,
+    discordUser: c.discordUser,
     operator: c.operator,
     taxId: c.taxId,
     address: c.address,

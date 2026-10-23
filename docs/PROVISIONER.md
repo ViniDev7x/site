@@ -50,3 +50,27 @@ Antes de reportar `ready`, faça um smoke test do processo/container e da porta/
 `DELETE /v1/services/<id>` remove recursos parciais de uma criação com falha e responde `{"deleted":true}`. Deve funcionar inclusive após timeout de criação, usando o ID idempotente. Se o recurso já não existir, confirme a remoção em vez de falhar. A plataforma só marca rollback confirmado após essa resposta.
 
 A criação é retomada após reiniciar a API. Timeouts são repetidos com o mesmo ID; após falhas repetidas ou 30 minutos, há compensação e alerta ao suporte. **Reembolso de falha ainda exige intervenção do operador no Stripe**; um cliente não deve ficar sem resposta enquanto uma cobrança permanece retida. O lançamento controlado precisa testar também esse procedimento.
+
+## Planos, Free e ampliação sem perda de dados
+
+Além das chaves anteriores, saúde pode declarar:
+
+```json
+{"freeTier":true,"policiesEnforced":true,"supportsResize":true,"features":{"settings":true,"backups":true},"limits":{"ram":64,"cpu":32,"disk":1000}}
+```
+
+Somente declare o que foi implementado no nó. Sem `freeTier` e `policiesEnforced`, a plataforma recusa criação Free. Os limites representam capacidade real e a plataforma os limita a 64 GB RAM, 32 vCPU e 1000 GB disco nesta versão. A API não mantém o teto antigo de 8 GB quando o nó suporta mais.
+
+A criação envia também `policies` (entitlements calculados pelo servidor), `platformHostname` e `freeRenewBy` quando Free. Imponha cgroups/VM, slots, ausência de domínio próprio, bloqueio de agendas automáticas e retenção de um backup manual. Configure DNS wildcard e proxy/portas/SSL necessários. O Free deve responder em `address` exatamente com o `platformHostname` solicitado. Para jogos, portas exclusivas devem ser representadas no mecanismo de roteamento do hostname (por exemplo SRV ou proxy adequado); não substitua por um domínio arbitrário.
+
+Imponha a parada por vencimento no próprio provisionador, preservando volumes mesmo quando a API Node não está disponível. `POST /v1/services/<id>/free-renewal` recebe `{"renewBy":"ISO-8601"}` autenticado e atualiza o prazo; não liga automaticamente o processo. A aplicação então permite iniciar pelo painel. A operação deve ser idempotente para a chave fornecida.
+
+`PATCH /v1/services/<id>/settings` recebe `{"customDomain":"exemplo.com","backupSchedule":"manual|daily|weekly","slots":20}`. Aplique apenas dentro das policies atuais. Aplique DNS/SSL e jobs de backup reais; não retorne sucesso se somente armazenou uma configuração sem efeito. `POST /v1/services/<id>/backups` solicita backup manual e deve respeitar retenção do plano e autorização do serviço. Backup dos clientes é separado do S3 de backup da plataforma.
+
+`PATCH /v1/services/<id>/resources`, com `Idempotency-Key: upgrade:<orderId>`, recebe:
+
+```json
+{"resources":{"plan":"starter","ram":6,"cpu":3,"disk":60,"category":"Sites","region":"São Paulo, BR","cycle":"monthly"},"policies":{"free":false,"customDomain":true,"automaticBackup":true,"manualBackup":true,"backupRetention":7,"maxSlots":0,"renewalDays":null},"configurationId":"orderId","preserveData":true}
+```
+
+Amplie o **mesmo** serviço/volume/IP/endereço; nunca recrie ou formate os dados. Se o disco não permitir resize seguro, retorne erro e encaminhe para revisão. Repetir a chave deve produzir a mesma operação. `GET /v1/services/<id>` passa a incluir `configurationId` e `resources` efetivamente aplicados. O worker só conclui com ID da configuração correto, RAM/CPU/disco exatos e estado `ready` ou `stopped`. Implemente as novas permissões de domínio/backup em conjunto com o resize e remova o prazo Free apenas quando ele tiver sucesso. Se falhar, preserve o serviço anterior. O worker de upgrade nunca envia DELETE.

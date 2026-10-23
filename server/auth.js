@@ -16,7 +16,7 @@ export const publicUser = (u) =>
   u
     ? Object.fromEntries(
         Object.entries(u).filter(
-          ([key]) => !["passwordHash", "passwordSalt"].includes(key),
+          ([key]) => !["passwordHash", "passwordSalt", "verifiedCardFingerprint"].includes(key),
         ),
       )
     : null;

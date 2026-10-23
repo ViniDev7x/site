@@ -1,3 +1,4 @@
+import { CouponsAdmin } from "./Plans.jsx";
 import React, { useEffect, useState } from "react";
 import {
   Gift,
@@ -700,6 +701,7 @@ export function AdminPanel({ notify }) {
         ))}
       </section>
       <div className="growth-columns">
+        <CouponsAdmin />
         <form
           className="panel settings-form"
           onSubmit={(e) => {

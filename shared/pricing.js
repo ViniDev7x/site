@@ -1,6 +1,7 @@
+import { PLANS, planSpecs, entitlements } from "./plans.js";
 // All prices are integer BRL cents. Both UI and API use the same versioned table.
 export const TABLE = {
-  version: "2026-10-v1",
+  version: "2026-10-v2",
   resources: { ram: 600, cpu: 800, disk: 20 },
   regions: { "São Paulo, BR": 1.15, "Miami, EUA": 1, "Frankfurt, DE": 1.1 },
   types: { Jogos: 1.2, "Bots Discord": 0.85, Sites: 1 },
@@ -97,6 +98,22 @@ export function normalizeSpecs(input = {}) {
     !has(TABLE.agency, agency)
   )
     throw new Error("Categoria, região, ciclo ou plano inválido.");
+  const selected = input.plan;
+  if (selected !== undefined) {
+    const preset = planSpecs(selected, input.ram ?? PLANS[selected]?.ram);
+    for (const key of ["ram", "cpu", "disk"])
+      if (input[key] !== undefined && input[key] !== preset[key])
+        throw new Error("Recursos incompatíveis com o plano.");
+    input = { ...input, ...preset };
+    if (
+      selected === "free" &&
+      (cycle !== "monthly" ||
+        agency !== "personal" ||
+        input.template ||
+        Object.values(input.addons || {}).some(Boolean))
+    )
+      throw new Error("Free não permite adicionais, licença ou ciclo pago.");
+  }
   const addons = {};
   for (const [key, quantity] of Object.entries(input.addons || {})) {
     if (
@@ -118,6 +135,7 @@ export function normalizeSpecs(input = {}) {
   )
     throw new Error("Template incompatível.");
   return {
+    ...(selected === undefined ? {} : { plan: selected }),
     category,
     region,
     cycle,
@@ -137,6 +155,31 @@ export function quote(input, margin = 0) {
     margin > TABLE.margin.max
   )
     throw new Error("Margem fora da faixa permitida.");
+  if (specs.plan === "free")
+    return {
+      version: TABLE.version,
+      specs,
+      resourceLines: [],
+      addonLines: [],
+      regionFactor: TABLE.regions[specs.region],
+      typeFactor: TABLE.types[specs.category],
+      margin: 0,
+      marginCents: 0,
+      planCents: 0,
+      monthly: 0,
+      months: 1,
+      discountPercent: 0,
+      discount: 0,
+      recurring: 0,
+      monthlyEquivalent: 0,
+      once: 0,
+      total: 0,
+      renewal: 0,
+      requiresVerification: false,
+      taxesIncluded: true,
+      currency: "brl",
+      entitlements: entitlements(specs),
+    };
   const factor = TABLE.types[specs.category] * TABLE.regions[specs.region];
   const resourceLines = [
     ["ram", "Memória RAM", "GB"],
@@ -168,6 +211,7 @@ export function quote(input, margin = 0) {
   const once = product?.cents || 0;
   return {
     version: TABLE.version,
+    entitlements: entitlements(specs),
     specs,
     resourceLines,
     addonLines,

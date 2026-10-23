@@ -53,6 +53,7 @@ import {
 } from "./DayOne.jsx";
 import { LegalFooter, LegalPage, SupportContact } from "./Legal.jsx";
 import { api, post } from "./api.js";
+import { PlanCards, ServicePlanControls, PendingOrders } from "./Plans.jsx";
 import ServiceWizard from "./ServiceWizard.jsx";
 import Onboarding from "./Onboarding.jsx";
 import ServiceSettings from "./ServiceSettings.jsx";
@@ -499,34 +500,48 @@ function App({ runtime }) {
                     ))}
                   </>
                 ) : tab === "Backups" ? (
-                  <>
-                    <div className="panel-title">
-                      <h3>Backups automáticos</h3>
-                      <button
-                        className="secondary"
-                        onClick={() => notify("Backup de demonstração criado.")}
-                      >
-                        Criar backup
-                      </button>
-                    </div>
-                    {["Hoje, 08:00", "Ontem, 08:00", "21 out, 08:00"].map(
-                      (d) => (
-                        <div className="file-row">
-                          <Database size={18} />
-                          {d}
-                          <span>Backup completo</span>
-                          <button
-                            className="secondary"
-                            onClick={() =>
-                              notify("Restauração simulada concluída.")
-                            }
-                          >
-                            Restaurar
-                          </button>
-                        </div>
-                      ),
-                    )}
-                  </>
+                  detail.quote.specs.plan ? (
+                    <ServicePlanControls
+                      key={detail.id}
+                      service={detail}
+                      onChange={setDetail}
+                      onUpgrade={() => {
+                        setWizardConfig({ upgradeService: detail });
+                        setWizard(true);
+                      }}
+                    />
+                  ) : (
+                    <>
+                      <div className="panel-title">
+                        <h3>Backups automáticos</h3>
+                        <button
+                          className="secondary"
+                          onClick={() =>
+                            notify("Backup de demonstração criado.")
+                          }
+                        >
+                          Criar backup
+                        </button>
+                      </div>
+                      {["Hoje, 08:00", "Ontem, 08:00", "21 out, 08:00"].map(
+                        (d) => (
+                          <div className="file-row">
+                            <Database size={18} />
+                            {d}
+                            <span>Backup completo</span>
+                            <button
+                              className="secondary"
+                              onClick={() =>
+                                notify("Restauração simulada concluída.")
+                              }
+                            >
+                              Restaurar
+                            </button>
+                          </div>
+                        ),
+                      )}
+                    </>
+                  )
                 ) : (
                   <>
                     <h3>Configurações</h3>
@@ -540,6 +555,17 @@ function App({ runtime }) {
                         }}
                       />
                     </label>
+                    {detail.quote.specs.plan && (
+                      <ServicePlanControls
+                        key={detail.id}
+                        service={detail}
+                        onChange={setDetail}
+                        onUpgrade={() => {
+                          setWizardConfig({ upgradeService: detail });
+                          setWizard(true);
+                        }}
+                      />
+                    )}
                     <ServiceSettings
                       key={detail.id}
                       service={detail}
@@ -757,6 +783,7 @@ function App({ runtime }) {
                     <kbd>⌘ K</kbd>
                   </div>
                 </div>
+                <PendingOrders />
                 <div className="service-grid">
                   {services
                     .filter(
@@ -1024,38 +1051,19 @@ function App({ runtime }) {
                   </button>
                 </section>
               ) : (
-                <div className="docs-grid">
-                  {[
-                    ["Jogos", Gamepad2, "39,90"],
-                    ["Bots Discord", Bot, "14,90"],
-                    ["Sites", Globe, "24,90"],
-                  ].map(([c, I, p]) => (
-                    <section className="panel plan">
-                      <I size={32} />
-                      <h2>{c}</h2>
-                      <p>A infraestrutura certa para o seu projeto.</p>
-                      <h1>
-                        R$ {p}
-                        <small>/mês</small>
-                      </h1>
-                      <p>
-                        ✓ Proteção de infraestrutura
-                        <br />✓ Backups automáticos
-                        <br />✓ Suporte 24/7
-                        <br />✓ Migração gratuita
-                      </p>
-                      <button
-                        className="primary"
-                        onClick={() => {
-                          setCategory(c);
-                          openWizard();
-                        }}
-                      >
-                        Configurar plano <ArrowRight size={16} />
-                      </button>
-                    </section>
-                  ))}
-                </div>
+                <section className="panel">
+                  <h2>Planos para começar e crescer</h2>
+                  <p>
+                    Free sem cartão. Preços para jogos em São Paulo; confira sua
+                    categoria no wizard.
+                  </p>
+                  <PlanCards
+                    onSelect={(plan) => {
+                      setWizardConfig({ category: "Jogos", plan });
+                      setWizard(true);
+                    }}
+                  />
+                </section>
               )}
             </>
           )}
@@ -1064,6 +1072,8 @@ function App({ runtime }) {
       {wizard && (
         <ServiceWizard
           runtime={runtime}
+          upgradeService={wizardConfig.upgradeService}
+          initialPlan={wizardConfig.plan || "free"}
           onClose={() => setWizard(false)}
           onCreated={onCreated}
           initialCategory={wizardConfig.category}

@@ -56,7 +56,7 @@ O script valida integridade e recusa sobrescrever destino existente. Pare a plat
 ## Stripe live e compra controlada
 
 1. Ative sua conta Stripe, conclua verificação do negócio/conta bancária e configure e-mails do Stripe para cobranças recorrentes e falhas. A aplicação exige conta com cobranças e recebimentos habilitados.
-2. Defina `STRIPE_SECRET_KEY` **live** e segredo do endpoint live `/api/billing/webhook`. Eventos: `invoice.paid`, `invoice.payment_failed`, `customer.subscription.deleted`; configure também eventos de estorno/disputa usados pela operação. Não misture endpoints/secrets test/live.
+2. Defina `STRIPE_SECRET_KEY` **live** e segredo do endpoint live `/api/billing/webhook`. Eventos: `invoice.paid`, `invoice.payment_failed`, `customer.subscription.deleted`, `checkout.session.expired`; configure também eventos de estorno/disputa usados pela operação. Não misture endpoints/secrets test/live.
 3. Mantenha `PUBLIC_CHECKOUT_ENABLED=false` e `LAUNCH_TEST_EMAIL=vinitudotwo@gmail.com`. A conta desse endereço deve se cadastrar, confirmar e-mail e entrar. Apenas ela poderá realizar a primeira compra, depois de domínio/TLS, Stripe, e-mail, backup e provisionador passarem no preflight.
 4. Na tela Operação, autentique com a conta da lista `ADMIN_EMAILS` e o token administrativo. Confira todos os pré-requisitos. Não force flags ou use mocks para contornar verificações.
 5. O próprio titular deve concluir uma compra real de valor conhecido no Checkout, com um plano que o nó consiga entregar. Confira o débito, a fatura live no Stripe, o webhook, o job e o serviço utilizável pelo endereço entregue. **Não basta receber o redirecionamento de sucesso.**
@@ -84,3 +84,7 @@ O workflow usa checkout fixado por commit, verifica `/`, `/api/health`, `/api/re
 - [ ] Cancelamento e reembolso ensaiados; alertas operacionais recebidos.
 - [ ] Monitor externo e alerta de queda testados.
 - [ ] Só depois: abrir checkout público e divulgar.
+
+## Atualização: Free, planos pagos e cupons
+
+Veja [PLANOS-E-CUPONS.md](PLANOS-E-CUPONS.md). O Free não exige gateway nem compra de lançamento, mas precisa de infraestrutura, TLS, e-mail, backup, domínio wildcard de serviços e políticas reais. Os bloqueios de cobrança acima continuam para planos pagos e upgrades. O provisionador deve implementar os novos contratos de políticas, renovação, backup, configurações e resize antes de oferecê-los ao público.

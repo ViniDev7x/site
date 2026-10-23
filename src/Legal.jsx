@@ -55,7 +55,12 @@ export function SupportContact({ config }) {
           Abrir Discord de suporte ↗
         </a>
       )}
-      {config.discordUser&&!config.discord&&<p className="muted">Usuário Discord: <b>{config.discordUser}</b>. Para abrir o servidor de suporte, aguarde um convite oficial da equipe.</p>}
+      {config.discordUser && !config.discord && (
+        <p className="muted">
+          Usuário Discord: <b>{config.discordUser}</b>. Para abrir o servidor de
+          suporte, aguarde um convite oficial da equipe.
+        </p>
+      )}
       <p className="muted">
         Solicitações de cancelamento, reembolso e direitos de privacidade também
         podem ser feitas por e-mail. Não há assistente de IA nesta versão.
@@ -94,6 +99,22 @@ export function LegalPage({ config, type }) {
               recursos e o valor de renovação são apresentados antes de pagar.
               Funcionalidades marcadas como indisponíveis não integram a oferta.
               O recibo do gateway não substitui documento fiscal quando exigido.
+            </p>
+            <h3>Plano Free e cupons</h3>
+            <p>
+              Free: 4 GB RAM, 2 vCPU e 40 GB de disco, sem cartão. Apenas um
+              resgate por conta/CPF/e-mail, inclusive após upgrade; a
+              verificação por cartão só é possível se já existir identificador
+              verificado. Há até 5 slots de jogos, backup manual e apenas
+              subdomínio da plataforma. Renove manualmente a cada 7 dias: sem
+              renovação o serviço é pausado, preservando os dados. Não há
+              migração automática para plano pago. Upgrade exige confirmação
+              expressa do preço e do pagamento e preserva o serviço existente;
+              recursos de maior porte estão sujeitos à verificação de identidade
+              e pagamento. Cupons seguem validade, planos e limites informados;
+              a validade limita novas adesões. O desconto confirmado é aplicado
+              ao ciclo e às renovações da mesma assinatura, com cobrança mínima
+              de R$ 1,00 por ciclo pago.
             </p>
             <h2>2. Acesso antecipado</h2>
             <p>
@@ -177,6 +198,18 @@ export function LegalPage({ config, type }) {
               verificação. A plataforma não coleta dados biométricos ou cópias
               de documentos neste fluxo.
             </p>
+            <p>
+              Para resgatar o Free, o CPF é validado e convertido em
+              identificador HMAC com chave secreta; não guardamos o CPF em texto
+              puro neste fluxo. Identificadores de conta, CPF, e-mail
+              normalizado e cartão previamente verificado (quando disponível)
+              impedem resgates repetidos. Esses identificadores continuam sendo
+              dados pessoais pseudonimizados, não dados anônimos. Os registros
+              de cupom vinculam conta, pedido, desconto e referência de
+              indicação para limites e relatórios; não geram comissão
+              automaticamente. A validação matemática do CPF não equivale a
+              verificar sua titularidade em órgão oficial.
+            </p>
             <h2>3. Finalidades e bases legais</h2>
             <p>
               Cadastro, autenticação, provisionamento, cobrança e comunicações
@@ -208,8 +241,12 @@ export function LegalPage({ config, type }) {
               retidos por até 6 meses quando exigíveis, e registros
               fiscais/contábeis seguem os prazos legais aplicáveis. Tokens de
               acesso expiram, sessões podem ser revogadas e cópias de segurança
-              seguem a retenção do armazenamento externo. Nenhum sistema é imune
-              a incidentes.
+              seguem a retenção do armazenamento externo. Os identificadores de
+              resgate permanecem enquanto necessários para administrar o
+              benefício único e prevenir fraude, inclusive após upgrade;
+              solicitações de revisão, retenção ou eliminação podem ser feitas
+              ao contato de privacidade, observadas as bases legais aplicáveis.
+              Nenhum sistema é imune a incidentes.
             </p>
             <h2>6. Seus direitos</h2>
             <p>

@@ -11,8 +11,28 @@ import {
   CheckCircle2,
 } from "lucide-react";
 import { TABLE, CATALOG, quote, brl } from "../shared/pricing.js";
+import { PLANS, planSpecs } from "../shared/plans.js";
+import { PlanCards } from "./Plans.jsx";
 import { api, post } from "./api.js";
 export function PriceBreakdown({ value: q, compact = false }) {
+  if (q.specs.plan === "free")
+    return (
+      <section className="price-breakdown" aria-live="polite">
+        <h3>Plano Free · 4 GB</h3>
+        <div className="checkout-total">
+          <span>Total a pagar agora</span>
+          <b data-testid="price-total">{brl(0)}</b>
+        </div>
+        <p>
+          Sem cartão, sem cobrança e sem renovação paga. Renove manualmente a
+          cada 7 dias para manter o serviço ativo.
+        </p>
+        <p>
+          1 resgate por conta/CPF/e-mail; até 5 jogadores, backup manual e
+          somente subdomínio da plataforma.
+        </p>
+      </section>
+    );
   return (
     <section
       className={"price-breakdown " + (compact ? "compact-price" : "")}
@@ -68,6 +88,12 @@ export function PriceBreakdown({ value: q, compact = false }) {
               <b>− {brl(q.discount)}</b>
             </div>
           )}
+          {q.coupon && (
+            <div className="price-row savings">
+              <span>Cupom {q.coupon.code} · todas as renovações</span>
+              <b>− {brl(q.couponDiscount)}</b>
+            </div>
+          )}
           {q.once > 0 && (
             <div className="price-row">
               <span>Template · licença única, sem desconto</span>
@@ -100,31 +126,37 @@ export default function ServiceWizard({
   initialTemplate = null,
   addonPreset = null,
   initialAgency = "personal",
+  initialPlan = "free",
+  upgradeService = null,
 }) {
   const growth = runtime.features?.growth === true;
-  const [step, setStep] = useState(1),
+  const chosenPlan = upgradeService ? "starter" : initialPlan;
+  const [step, setStep] = useState(upgradeService ? 4 : 1),
     [specs, setSpecs] = useState({
-      category: initialCategory,
-      ram: Math.min(4, runtime.capabilities?.limits.ram || 4),
-      cpu: Math.min(2, runtime.capabilities?.limits.cpu || 2),
-      disk: Math.min(40, runtime.capabilities?.limits.disk || 40),
-      region: runtime.capabilities?.regions?.[0] || "São Paulo, BR",
+      category: upgradeService?.category || initialCategory,
+      ...planSpecs(chosenPlan),
+      region:
+        upgradeService?.quote.specs.region ||
+        runtime.capabilities?.regions?.[0] ||
+        "São Paulo, BR",
       cycle: "monthly",
       addons: growth ? addonPreset || {} : {},
       agency: growth ? initialAgency : "personal",
       template: growth ? initialTemplate : null,
     });
-  const [name, setName] = useState(""),
+  const [name, setName] = useState(upgradeService?.name || ""),
     [subtype, setSubtype] = useState(
-      runtime.production
-        ? runtime.capabilities?.types?.[initialCategory]?.[0]
-        : initialTemplate
-          ? CATALOG.find((p) => p.id === initialTemplate)?.subtype
-          : initialCategory === "Jogos"
-            ? "Minecraft"
-            : initialCategory === "Sites"
-              ? "Next.js"
-              : "Node.js",
+      upgradeService
+        ? upgradeService.type
+        : runtime.production
+          ? runtime.capabilities?.types?.[initialCategory]?.[0]
+          : initialTemplate
+            ? CATALOG.find((p) => p.id === initialTemplate)?.subtype
+            : initialCategory === "Jogos"
+              ? "Minecraft"
+              : initialCategory === "Sites"
+                ? "Next.js"
+                : "Node.js",
     );
   const [error, setError] = useState(""),
     [busy, setBusy] = useState(false),
@@ -140,12 +172,16 @@ export default function ServiceWizard({
     [stripeReady, setStripeReady] = useState(false),
     [margin, setMargin] = useState(0),
     [identity, setIdentity] = useState(null);
+  const [couponDraft, setCouponDraft] = useState(""),
+    [couponCode, setCouponCode] = useState(""),
+    [cpf, setCpf] = useState(""),
+    [freeEmail, setFreeEmail] = useState("");
   const requestId = useRef(crypto.randomUUID());
   const referralCode = growth
     ? localStorage.getItem("nexora-referral") || ""
     : "";
   const localQuote = quote(specs, margin);
-  const inputKey = JSON.stringify({ ...specs, referralCode });
+  const inputKey = JSON.stringify({ ...specs, referralCode, couponCode });
   useEffect(() => {
     requestId.current = crypto.randomUUID();
   }, [inputKey, subtype, name, upload?.id, paymentMode]);
@@ -207,6 +243,10 @@ export default function ServiceWizard({
     };
   }, [job?.id, job?.status]);
   function change(key, value) {
+    if (key === "ram" && specs.plan === "elite") {
+      setSpecs((s) => ({ ...s, ...planSpecs("elite", value) }));
+      return;
+    }
     setSpecs((s) => ({ ...s, [key]: value }));
     requestId.current = crypto.randomUUID();
   }
@@ -226,7 +266,11 @@ export default function ServiceWizard({
         requestId: requestId.current,
         expectedTotal: authoritative.total,
         priceVersion: authoritative.version,
-        paymentMode,
+        paymentMode: specs.plan === "free" ? "free" : paymentMode,
+        couponCode,
+        cpf,
+        freeEmail,
+        upgradeServiceId: upgradeService?.id,
         acceptedLegalVersion: accepted ? runtime.legalVersion : null,
       });
       if (result.url) {
@@ -278,7 +322,7 @@ export default function ServiceWizard({
         <div className="panel-title">
           <div>
             <div className="eyebrow">SEU PROJETO, SEU JEITO</div>
-            <h2>Criar serviço</h2>
+            <h2>{upgradeService ? "Upgrade do serviço" : "Criar serviço"}</h2>
           </div>
           <button
             className="icon-button"
@@ -311,8 +355,10 @@ export default function ServiceWizard({
               <i style={{ width: job.progress + "%" }} />
             </div>
             <p>
-              {job.progress}% · Worker persistente de demonstração. Nenhum
-              container real.
+              {job.progress}% ·{" "}
+              {runtime.production
+                ? "Aguardando confirmação da infraestrutura."
+                : "Worker de demonstração; nenhum container real."}
             </p>
           </div>
         ) : (
@@ -487,16 +533,48 @@ export default function ServiceWizard({
                 </>
               ) : step === 4 ? (
                 <>
-                  <h3>Espaço para crescer.</h3>
+                  <h3>Escolha seu plano</h3>
+                  <PlanCards
+                    selected={specs.plan}
+                    hideFree={!!upgradeService}
+                    category={specs.category}
+                    region={specs.region}
+                    onSelect={(id) => {
+                      setSpecs((s) => ({
+                        ...s,
+                        ...planSpecs(id),
+                        cycle: id === "free" ? "monthly" : s.cycle,
+                        addons: {},
+                        template: null,
+                        agency: "personal",
+                      }));
+                      if (id === "free") {
+                        setCouponCode("");
+                        setCouponDraft("");
+                      }
+                    }}
+                  />
+                  {upgradeService && (
+                    <p>
+                      O upgrade mantém o mesmo serviço, endereço, arquivos e
+                      configurações. O ciclo pago começa após a confirmação do
+                      pagamento; não há cobrança proporcional do Free.
+                    </p>
+                  )}
+                  <p>
+                    CPU e disco acompanham a RAM proporcionalmente. No Elite,
+                    ajuste a RAM de 32 até 64 GB. A infraestrutura precisa ter
+                    capacidade disponível.
+                  </p>
                   <div className="resource-inputs">
                     {[
                       [
                         "ram",
                         "Memória RAM",
                         "GB",
-                        1,
+                        specs.plan === "elite" ? 32 : 1,
                         runtime.production
-                          ? runtime.capabilities?.limits.ram || 8
+                          ? runtime.capabilities?.limits.ram || 64
                           : 64,
                       ],
                       [
@@ -523,6 +601,7 @@ export default function ServiceWizard({
                         <div className="resource-number">
                           <input
                             type="number"
+                            disabled={specs.plan !== "elite" || k !== "ram"}
                             aria-label={t}
                             min={min}
                             max={max}
@@ -538,6 +617,7 @@ export default function ServiceWizard({
                         <input
                           aria-label={t + " slider"}
                           type="range"
+                          disabled={specs.plan !== "elite" || k !== "ram"}
                           min={min}
                           max={max}
                           value={specs[k]}
@@ -551,6 +631,7 @@ export default function ServiceWizard({
                       Localização
                       <select
                         value={specs.region}
+                        disabled={!!upgradeService}
                         onChange={(e) => change("region", e.target.value)}
                       >
                         {Object.keys(TABLE.regions)
@@ -568,6 +649,7 @@ export default function ServiceWizard({
                       Ciclo de cobrança
                       <select
                         value={specs.cycle}
+                        disabled={specs.plan === "free"}
                         onChange={(e) => change("cycle", e.target.value)}
                       >
                         {Object.entries(TABLE.cycles).map(([k, c]) => (
@@ -686,12 +768,80 @@ export default function ServiceWizard({
                       </div>
                     ))}
                   </div>
-                  {runtime.production ? (
+                  {specs.plan === "free" ? (
+                    <div className="free-claim">
+                      <h3>Comece sem cartão</h3>
+                      <label>
+                        CPF do titular
+                        <input
+                          inputMode="numeric"
+                          autoComplete="off"
+                          maxLength={14}
+                          value={cpf}
+                          onChange={(e) => setCpf(e.target.value)}
+                          placeholder="CPF para resgate único"
+                        />
+                      </label>
+                      {!identity?.email && (
+                        <label>
+                          E-mail para resgate Free
+                          <input
+                            type="email"
+                            value={freeEmail}
+                            onChange={(e) => setFreeEmail(e.target.value)}
+                            placeholder="voce@exemplo.com"
+                          />
+                        </label>
+                      )}
+                      <p>
+                        O CPF é comparado por identificador criptográfico para
+                        evitar resgates repetidos; não é armazenado em texto
+                        puro. Em produção, confirme seu e-mail. Apenas um
+                        resgate Free por identidade, mesmo após upgrade.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="coupon-entry">
+                      <label>
+                        Cupom de desconto
+                        <input
+                          maxLength={32}
+                          value={couponDraft}
+                          onChange={(e) =>
+                            setCouponDraft(e.target.value.toUpperCase())
+                          }
+                          placeholder="Digite seu cupom"
+                        />
+                      </label>
+                      <button
+                        className="secondary"
+                        onClick={() => setCouponCode(couponDraft.trim())}
+                      >
+                        Aplicar cupom
+                      </button>
+                      {couponCode && (
+                        <button
+                          className="text-button"
+                          onClick={() => {
+                            setCouponCode("");
+                            setCouponDraft("");
+                          }}
+                        >
+                          Remover cupom
+                        </button>
+                      )}
+                      <p>
+                        Descontos em percentual ou reais por ciclo, aplicados
+                        também às renovações. O total validado aparece abaixo.
+                      </p>
+                    </div>
+                  )}
+                  {runtime.production && specs.plan !== "free" ? (
                     <p className="muted">
                       Pagamento seguro via Stripe. Seu serviço só será liberado
                       após a confirmação do pagamento e da infraestrutura.
                     </p>
-                  ) : (
+                  ) : !runtime.production && specs.plan !== "free" ? (
                     <>
                       <p className="warning">
                         Demonstração: nenhum pagamento ou serviço real.
@@ -712,7 +862,7 @@ export default function ServiceWizard({
                         </select>
                       </label>
                     </>
-                  )}
+                  ) : null}
                   <label className="policy-check">
                     <input
                       type="checkbox"
@@ -732,8 +882,10 @@ export default function ServiceWizard({
                       <a href="/reembolsos" target="_blank" rel="noopener">
                         Política de Reembolso e Cancelamento
                       </a>
-                      . Não hospedarei conteúdo proibido. A renovação será
-                      automática no ciclo informado, até ser cancelada.
+                      . Não hospedarei conteúdo proibido.{" "}
+                      {specs.plan === "free"
+                        ? "O Free exige renovação manual a cada 7 dias e não gera cobrança."
+                        : "A renovação será automática no ciclo informado, até ser cancelada."}
                     </span>
                   </label>
                   <p className="muted">
@@ -766,9 +918,13 @@ export default function ServiceWizard({
               <button
                 className="secondary"
                 disabled={busy || uploading}
-                onClick={() => (step === 1 ? onClose() : setStep(step - 1))}
+                onClick={() =>
+                  step === (upgradeService ? 4 : 1)
+                    ? onClose()
+                    : setStep(step - 1)
+                }
               >
-                {step === 1 ? "Cancelar" : "Voltar"}
+                {step === (upgradeService ? 4 : 1) ? "Cancelar" : "Voltar"}
               </button>
               <button
                 className="primary"
@@ -776,18 +932,24 @@ export default function ServiceWizard({
                   busy ||
                   uploading ||
                   !!scanError ||
-                  (step === 5 && (!accepted || !authoritative))
+                  (step === 5 &&
+                    (!accepted ||
+                      !authoritative ||
+                      (specs.plan === "free" &&
+                        (!cpf || (!identity?.email && !freeEmail)))))
                 }
                 onClick={() => (step < 5 ? setStep(step + 1) : submit())}
               >
                 {busy
                   ? "Registrando..."
                   : step === 5
-                    ? paymentMode === "stripe"
-                      ? runtime.production
-                        ? "Ir ao pagamento seguro"
-                        : "Ir ao Stripe de teste"
-                      : "Criar demonstração"
+                    ? specs.plan === "free"
+                      ? "Criar Free sem cartão"
+                      : paymentMode === "stripe"
+                        ? runtime.production
+                          ? "Ir ao pagamento seguro"
+                          : "Ir ao Stripe de teste"
+                        : "Criar demonstração"
                     : "Continuar"}
                 <ArrowRight size={16} />
               </button>

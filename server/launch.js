@@ -11,8 +11,10 @@ export function launchOperations({
   notify,
   fetchPublic = fetch,
   instanceId,
+  plans,
 }) {
-  let probing = false;let stopping=false;
+  let probing = false;
+  let stopping = false;
   const activeJobs = new Set();
   const health = {
     tls: false,
@@ -62,7 +64,9 @@ export function launchOperations({
     );
   }
   return {
-    stop(){stopping=true;},
+    stop() {
+      stopping = true;
+    },
     status() {
       return {
         ...health,
@@ -72,24 +76,36 @@ export function launchOperations({
         ready: Boolean(prerequisites() && (!config.publicCheckout || proof())),
       };
     },
+    canStartFree(ownerId) {
+      const u = store.get("users", ownerId);
+      return Boolean(
+        u?.emailVerified &&
+          health.tls &&
+          health.mail &&
+          health.provider?.freeTier &&
+          config.serviceDomain &&
+          backups.healthy() &&
+          Date.now() - health.checkedAt < 180000,
+      );
+    },
     canCharge(ownerId) {
       const user = store.get("users", ownerId);
       return Boolean(
         prerequisites() &&
-        user?.emailVerified &&
-        (config.publicCheckout
-          ? proof()
-          : config.launchTestEmail && user.email === config.launchTestEmail),
+          user?.emailVerified &&
+          (config.publicCheckout
+            ? proof()
+            : config.launchTestEmail && user.email === config.launchTestEmail),
       );
     },
     supports(specs, subtype) {
       const p = health.provider;
       return Boolean(
         p &&
-        p.categories.includes(specs.category) &&
-        p.types[specs.category]?.includes(subtype) &&
-        p.regions.includes(specs.region) &&
-        ["ram", "cpu", "disk"].every((k) => specs[k] <= p.limits[k]),
+          p.categories.includes(specs.category) &&
+          p.types[specs.category]?.includes(subtype) &&
+          p.regions.includes(specs.region) &&
+          ["ram", "cpu", "disk"].every((k) => specs[k] <= p.limits[k]),
       );
     },
     async probe() {
@@ -142,12 +158,19 @@ export function launchOperations({
             ["queued", "running"].includes(j.status) &&
             (!j.nextAttempt || j.nextAttempt < Date.now()),
         )) {
-        if(stopping)break;
+        if (stopping) break;
         if (activeJobs.has(job.id)) continue;
         activeJobs.add(job.id);
         try {
           const order = store.get("orders", job.orderId);
-          if (!order?.live || order.status !== "paid")
+          if (job.kind === "upgrade") {
+            await plans.upgradeTick(job, order);
+            continue;
+          }
+          if (
+            (!order?.live && order?.paymentMode !== "free") ||
+            order.status !== "paid"
+          )
             throw Object.assign(
               new Error("Pedido sem pagamento live confirmado."),
               { retryable: false },
@@ -187,6 +210,14 @@ export function launchOperations({
             throw Object.assign(new Error("Endereço de acesso inválido."), {
               retryable: false,
             });
+          if (
+            order.paymentMode === "free" &&
+            result.address !== order.platformHostname
+          )
+            throw Object.assign(
+              new Error("O Free exige o subdomínio atribuído pela plataforma."),
+              { retryable: false },
+            );
           store.transaction(() => {
             const s = order.quote.specs;
             const service = store.put("services", {
@@ -218,6 +249,11 @@ export function launchOperations({
               address: result.address,
               cost: order.quote.monthlyEquivalent / 100,
               quote: order.quote,
+              entitlements: order.entitlements,
+              freeTier:
+                order.paymentMode === "free"
+                  ? { renewBy: order.freeRenewBy }
+                  : null,
               demo: false,
               createdAt: new Date().toISOString(),
               onboarding: { tourSeen: true, steps: {} },
@@ -283,7 +319,7 @@ export function launchOperations({
             kind: "failure",
             to: user?.email,
             subject: "Precisamos revisar a criação do seu serviço",
-            message: `Seu pagamento foi registrado, mas a infraestrutura não concluiu a entrega. Entre em contato com ${config.supportEmail}. A equipe foi notificada e deve providenciar correção ou reembolso.`,
+            message: `A infraestrutura não concluiu a entrega do seu pedido. Entre em contato com ${config.supportEmail}. A equipe foi notificada e deve providenciar correção ou reembolso.`,
             link: config.origin,
           });
           mail.enqueue({

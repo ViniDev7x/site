@@ -15,6 +15,12 @@ import {
 } from "lucide-react";
 import { api, post } from "./api.js";
 import { LegalFooter, LegalPage, SupportContact } from "./Legal.jsx";
+import {
+  PlanCards,
+  CouponsAdmin,
+  ServicePlanControls,
+  PendingOrders,
+} from "./Plans.jsx";
 import ServiceWizard from "./ServiceWizard.jsx";
 import { TABLE, quote, brl } from "../shared/pricing.js";
 export class AppErrorBoundary extends React.Component {
@@ -147,7 +153,8 @@ export function AuthPage({ config, onLogin, initialMode = "login" }) {
             <label>
               {mode === "reset" ? "Nova senha" : "Senha"}
               <input
-                type="password" aria-label={mode==='reset'?'Nova senha':'Senha'}
+                type="password"
+                aria-label={mode === "reset" ? "Nova senha" : "Senha"}
                 autoComplete={
                   mode === "login" ? "current-password" : "new-password"
                 }
@@ -285,32 +292,18 @@ export function PublicLanding({ config, onLogin }) {
           Estamos em acesso antecipado.{" "}
           {config.checkoutAvailable
             ? "Contratações liberadas para as categorias disponíveis."
-            : "Contratações públicas ainda não liberadas. Fale com a equipe para saber mais."}
+            : "Crie sua conta sem comprar. Free não exige cartão e depende da infraestrutura disponível; planos pagos ainda não foram liberados."}
         </p>
       </section>
-      <div className="docs-grid">
-        {["Jogos", "Bots Discord", "Sites"].map((category) => {
-          const q = quote({ category, ram: 2, cpu: 1, disk: 20 });
-          return (
-            <section className="panel launch-plan" key={category}>
-              <Server size={26} />
-              <h2>{category}</h2>
-              <p>Exemplo: 2 GB RAM · 1 vCPU · 20 GB disco · São Paulo</p>
-              <div className="market-price">
-                {brl(q.total)}
-                <small>/mês</small>
-              </div>
-              <p>
-                O preço final e a disponibilidade são confirmados antes do
-                checkout. Nenhum recurso adicional é incluído sem indicação.
-              </p>
-              <button className="secondary" onClick={() => setAuth("register")}>
-                Configurar no painel <ArrowRight size={14} />
-              </button>
-            </section>
-          );
-        })}
-      </div>
+      <section className="panel">
+        <h2>Comece com Free. Cresça quando quiser.</h2>
+        <p>
+          Mesmos planos para jogos, bots e sites. Valores abaixo para jogos em
+          São Paulo; confira o preço da sua categoria no wizard. Free: sem
+          cartão, renovação manual a cada 7 dias.
+        </p>
+        <PlanCards onSelect={() => setAuth("register")} />
+      </section>
       <SupportContact config={config} />
       <LegalFooter config={config} />
     </div>
@@ -531,6 +524,7 @@ function Operations({ onError }) {
           destinatário.
         </p>
       </section>
+      <CouponsAdmin />
       {error && <p className="form-error">{error}</p>}
     </>
   );
@@ -543,6 +537,7 @@ export function DayOneApp({ config, session, onLogout }) {
     [notifications, setNotifications] = useState([]),
     [detail, setDetail] = useState(null),
     [wizard, setWizard] = useState(false),
+    [upgrade, setUpgrade] = useState(null),
     [me, setMe] = useState(null),
     [error, setError] = useState(""),
     [busy, setBusy] = useState(false),
@@ -635,7 +630,9 @@ export function DayOneApp({ config, session, onLogout }) {
         </button>
       </header>
       <div className="beta-banner">
-        {config.production?'Acesso antecipado · Atendimento direto pelo suporte. Recursos indisponíveis não são oferecidos no checkout.':'Ambiente de desenvolvimento · Pagamentos e provisionamento são simulados.'}
+        {config.production
+          ? "Acesso antecipado · Atendimento direto pelo suporte. Recursos indisponíveis não são oferecidos no checkout."
+          : "Ambiente de desenvolvimento · Pagamentos e provisionamento são simulados."}
       </div>
       <div className="launch-layout">
         <aside className="launch-nav">
@@ -772,6 +769,15 @@ export function DayOneApp({ config, session, onLogout }) {
                   </p>
                 )}
               </section>
+              <ServicePlanControls
+                key={detail.id}
+                service={detail}
+                onChange={setDetail}
+                onUpgrade={() => {
+                  setUpgrade(detail);
+                  setWizard(true);
+                }}
+              />
               <SupportContact config={config} />
             </>
           ) : page === "Faturamento" ? (
@@ -792,8 +798,10 @@ export function DayOneApp({ config, session, onLogout }) {
                 </div>
                 <button
                   className="primary"
-                  disabled={!me?.canCheckout}
-                  onClick={() => setWizard(true)}
+                  onClick={() => {
+                    setUpgrade(null);
+                    setWizard(true);
+                  }}
                 >
                   <Plus size={16} />
                   Contratar plano
@@ -801,8 +809,9 @@ export function DayOneApp({ config, session, onLogout }) {
               </div>
               {!me?.canCheckout && (
                 <div className="warning">
-                  As contratações ainda não foram liberadas para esta conta. O
-                  suporte está disponível abaixo.
+                  Planos pagos ainda não liberados nesta conta. O Free não exige
+                  cartão, mas depende de infraestrutura, e-mail e backup
+                  operacionais para criação real.
                 </div>
               )}
               <div className="search launch-search">
@@ -814,6 +823,7 @@ export function DayOneApp({ config, session, onLogout }) {
                   onChange={(e) => setQuery(e.target.value)}
                 />
               </div>
+              <PendingOrders />
               <div className="service-grid">
                 {services
                   .filter((s) =>
@@ -848,9 +858,9 @@ export function DayOneApp({ config, session, onLogout }) {
                   <Server size={30} />
                   <h2>Pronto para seu primeiro projeto?</h2>
                   <p>
-                    Quando a contratação estiver disponível, seus serviços
-                    aparecerão aqui após a confirmação do pagamento e da
-                    infraestrutura.
+                    Comece com o Free, sem cartão, quando a infraestrutura
+                    estiver disponível. Você pode fazer upgrade depois sem
+                    recriar seu serviço.
                   </p>
                 </section>
               )}
@@ -899,7 +909,11 @@ export function DayOneApp({ config, session, onLogout }) {
       {wizard && (
         <ServiceWizard
           runtime={runtime}
-          onClose={() => setWizard(false)}
+          upgradeService={upgrade}
+          onClose={() => {
+            setWizard(false);
+            setUpgrade(null);
+          }}
           onCreated={async (service) => {
             setWizard(false);
             setDetail(service);

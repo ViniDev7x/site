@@ -26,7 +26,7 @@ npx playwright install chromium
 npm run test:e2e
 ```
 
-`npm test`: 20 testes, incluindo senhas/sessões, tokens de uso único, rate limiting, separação test/live, 404/500, backup SQLite criptografado/restaurável e fluxo Stripe/provisionador/e-mail **com fornecedores simulados**. `test:e2e` cria um servidor isolado, testa cadastro → confirmação de e-mail → login → checkout/provisionamento de desenvolvimento → painel, suporte simples, links legais e mobile. Capturas ficam em `test-results/`. Para Chromium do sistema, defina `CHROMIUM_EXECUTABLE`; não é preciso iniciar `npm run dev` antes desse E2E.
+`npm test`: 31 testes, incluindo senhas/sessões, tokens de uso único, rate limiting, separação test/live, 404/500, backup SQLite criptografado/restaurável e fluxo Stripe/provisionador/e-mail **com fornecedores simulados**. `test:e2e` cria um servidor isolado, testa cadastro → confirmação de e-mail → login → checkout/provisionamento de desenvolvimento → painel, suporte simples, links legais e mobile. Capturas ficam em `test-results/`. Para Chromium do sistema, defina `CHROMIUM_EXECUTABLE`; não é preciso iniciar `npm run dev` antes desse E2E.
 
 Os testes não confirmam DNS, Let's Encrypt, Railway, banco externo, e-mails entregues na internet ou uma compra live. O fluxo externo precisa ser concluído no ambiente final.
 
@@ -39,7 +39,11 @@ O provisionador precisa existir e cumprir [o contrato de integração](docs/PROV
 - `PUBLIC_CHECKOUT_ENABLED=false` mantém a compra live restrita ao titular configurado, com todos os pré-requisitos verificados.
 - `PUBLIC_CHECKOUT_ENABLED=true` só abre vendas depois de compra live, serviço realmente pronto e três e-mails entregues comprovados no banco.
 - Chaves test são recusadas em produção; chaves live são recusadas no modo de demonstração.
-- Se faltar backup, TLS, gateway habilitado, e-mail ou provisionador real, o checkout não cobra.
+- Se faltar backup, TLS, gateway habilitado, e-mail ou provisionador real, o checkout pago não cobra. O Free dispensa gateway, mas exige os demais pré-requisitos e políticas específicas no provisionador.
+
+## Planos Free e pagos
+
+Free (4 GB), Starter (6 GB), Plus (10 GB), Pro (16 GB) e Elite (32–64 GB) foram integrados ao wizard e à API. Free não exige cartão nem Checkout Stripe; usa resgate único por identidade e renovação manual em sete dias. Cupons possuem reservas/limites e administração; upgrade amplia o serviço existente após pagamento, preservando dados. Leia [PLANOS-E-CUPONS.md](docs/PLANOS-E-CUPONS.md) para regras, dependências reais, preços e testes. Novos contratos do provisionador precisam ser implementados antes de oferecer Free/upgrade em produção.
 
 ## Escopo do dia 1
 

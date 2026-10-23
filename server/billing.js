@@ -14,6 +14,9 @@ export function billingProvider({
   supportEmail = "",
   canCharge,
   onSubscriptionDeleted,
+  coupons,
+  onCheckoutExpired,
+  onVerifiedCard,
 }) {
   if (
     key &&
@@ -104,6 +107,7 @@ export function billingProvider({
           date: new Date().toISOString(),
         });
       }
+      coupons?.redeem(order);
       const updated = store.put("orders", {
         ...order,
         status: "paid",
@@ -162,6 +166,21 @@ export function billingProvider({
           ),
           { status: 503 },
         );
+      order = store.get("orders", order.id) || order;
+      if (order.status !== "awaiting-payment")
+        throw Object.assign(
+          new Error("Este pedido não aguarda mais pagamento."),
+          { status: 409 },
+        );
+      if (order.checkoutUrl && order.checkoutId)
+        return { url: order.checkoutUrl };
+      if (!order.checkoutExpiresAt) {
+        order = {
+          ...order,
+          checkoutExpiresAt: Math.floor(Date.now() / 1000) + 2100,
+        };
+        store.put("orders", order);
+      }
       const q = order.quote;
       const lines = [
         {
@@ -188,6 +207,8 @@ export function billingProvider({
       const session = await stripe.checkout.sessions.create(
         {
           mode: "subscription",
+          payment_method_types: ["card"],
+          expires_at: order.checkoutExpiresAt,
           client_reference_id: order.id,
           ...(production ? { customer_email: order.customerEmail } : {}),
           metadata: { orderId: order.id },
@@ -198,7 +219,11 @@ export function billingProvider({
         },
         { idempotencyKey: `checkout:${order.id}` },
       );
-      store.put("orders", { ...order, checkoutId: session.id });
+      store.put("orders", {
+        ...store.get("orders", order.id),
+        checkoutId: session.id,
+        checkoutUrl: session.url,
+      });
       return { url: session.url };
     },
     async cancelRenewal(order) {
@@ -284,6 +309,18 @@ export function billingProvider({
       if (store.get("events", event.id))
         return { received: true, duplicate: true };
       const obj = event.data.object;
+      if (event.type === "checkout.session.expired") {
+        const order = store.get("orders", obj.client_reference_id);
+        if (
+          order &&
+          order.status === "awaiting-payment" &&
+          order.checkoutId === obj.id
+        ) {
+          coupons?.release(order.id);
+          onCheckoutExpired?.(order);
+          store.put("orders", { ...order, status: "expired" });
+        }
+      }
       if (event.type === "account.updated") {
         const a = store
           .all("affiliates")
@@ -305,7 +342,7 @@ export function billingProvider({
           const sub = await stripe.subscriptions.retrieve(subId);
           const order = store.get("orders", sub.metadata.orderId);
           if (order) {
-            // The checkout is fixed-price, with no promotional codes. Only paid BRL invoices accrue commission.
+            // Discounted amounts are frozen on the order; only matching signed BRL invoices are accepted.
             if (obj.currency !== "brl" || !obj.paid)
               throw new Error("Fatura inválida.");
             const isFirst = obj.billing_reason === "subscription_create";
@@ -333,6 +370,31 @@ export function billingProvider({
               obj.id,
               recurring,
             );
+            if (production && onVerifiedCard) {
+              // Only verified gateway data; never accept a card fingerprint from public forms.
+              try {
+                let ref = obj.payment_intent;
+                if (!ref && stripe.invoicePayments?.list) {
+                  const payments = await stripe.invoicePayments.list({
+                    invoice: obj.id,
+                    limit: 10,
+                  });
+                  ref = payments.data?.find(
+                    (p) => p.payment?.type === "payment_intent",
+                  )?.payment.payment_intent;
+                }
+                const id = typeof ref === "string" ? ref : ref?.id;
+                if (id && stripe.paymentIntents?.retrieve) {
+                  const intent = await stripe.paymentIntents.retrieve(id, {
+                    expand: ["payment_method"],
+                  });
+                  const fp = intent.payment_method?.card?.fingerprint;
+                  if (fp) onVerifiedCard(order.ownerId, fp);
+                }
+              } catch {
+                /* Optional identity enrichment must not undo an already confirmed payment. */
+              }
+            }
           }
         }
       }

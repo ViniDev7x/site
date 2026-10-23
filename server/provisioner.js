@@ -61,6 +61,12 @@ export function provisionerClient({ url, token, request = fetch }) {
         )
           return null;
         return {
+          freeTier: h.freeTier === true && h.policiesEnforced === true,
+          supportsResize: h.supportsResize === true,
+          features: {
+            backups: h.features?.backups === true,
+            settings: h.features?.settings === true,
+          },
           ready: true,
           mode: "production",
           isolationEnforced: true,
@@ -73,9 +79,9 @@ export function provisionerClient({ url, token, request = fetch }) {
           ),
           regions,
           limits: {
-            ram: Math.min(8, h.limits.ram),
-            cpu: Math.min(4, h.limits.cpu),
-            disk: Math.min(100, h.limits.disk),
+            ram: Math.min(64, h.limits.ram),
+            cpu: Math.min(32, h.limits.cpu),
+            disk: Math.min(1000, h.limits.disk),
           },
         };
       } catch {
@@ -93,12 +99,41 @@ export function provisionerClient({ url, token, request = fetch }) {
           category: order.quote.specs.category,
           subtype: order.subtype,
           resources: order.quote.specs,
+          policies: order.entitlements,
+          platformHostname: order.platformHostname,
+          freeRenewBy: order.freeRenewBy,
         },
         job.serviceId,
       );
       if (result.id !== job.serviceId)
         throw new Error("Identificador divergente do provisionador.");
       return result;
+    },
+    async resize(id, resources, policies, configurationId) {
+      return call(
+        `/v1/services/${encodeURIComponent(id)}/resources`,
+        "PATCH",
+        { resources, policies, configurationId, preserveData: true },
+        `upgrade:${configurationId}`,
+      );
+    },
+    async renewFree(id, renewBy) {
+      return call(
+        `/v1/services/${encodeURIComponent(id)}/free-renewal`,
+        "POST",
+        { renewBy },
+        `renew:${id}:${renewBy}`,
+      );
+    },
+    async settings(id, settings) {
+      return call(
+        `/v1/services/${encodeURIComponent(id)}/settings`,
+        "PATCH",
+        settings,
+      );
+    },
+    async backup(id) {
+      return call(`/v1/services/${encodeURIComponent(id)}/backups`, "POST", {});
     },
     async get(id) {
       const result = await call(`/v1/services/${encodeURIComponent(id)}`);

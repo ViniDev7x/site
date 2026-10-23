@@ -24,6 +24,9 @@ import { join } from "node:path";
 import { createStore } from "./store.js";
 import { Limiter, POLICY, isolationProfile, scanUpload } from "./security.js";
 import { TABLE, CATALOG, quote } from "../shared/pricing.js";
+import { PLANS, entitlements, FREE_RENEWAL_DAYS } from "../shared/plans.js";
+import { couponService } from "./coupons.js";
+import { servicePlans, freeState } from "./service-plans.js";
 import { billingProvider } from "./billing.js";
 import { templateArchive } from "./templates.js";
 const now = () => new Date().toISOString();
@@ -55,8 +58,14 @@ export function createApplication(options = {}) {
     ? proxyaddr.compile(config.trustedProxies)
     : () => false;
   const clientIp = (req) => proxyaddr(req, trusted);
-  let launch;let closing=false;const pending=new Set();
-  function track(promise){pending.add(promise);promise.finally(()=>pending.delete(promise)).catch(()=>{});return promise;}
+  let launch;
+  let closing = false;
+  const pending = new Set();
+  function track(promise) {
+    pending.add(promise);
+    promise.finally(() => pending.delete(promise)).catch(() => {});
+    return promise;
+  }
   mkdirSync(dataDir, { recursive: true, mode: 0o700 });
   const store = options.store || createStore(join(dataDir, "nexora.sqlite"));
   const mode = store.get("system", "mode");
@@ -94,7 +103,31 @@ export function createApplication(options = {}) {
       createdAt: now(),
       read: false,
     });
+  const coupons = couponService({ store });
+  const plans = servicePlans({
+    store,
+    config,
+    provider,
+    notify,
+    clock: options.clock,
+  });
   const queue = (order) => {
+    if (order.kind === "upgrade") {
+      const service = store.get("services", order.targetServiceId);
+      if (!service || service.ownerId !== order.ownerId)
+        throw new Error("Serviço de upgrade inválido.");
+      return store.put("jobs", {
+        id: randomUUID(),
+        kind: "upgrade",
+        ownerId: order.ownerId,
+        orderId: order.id,
+        serviceId: service.id,
+        status: "queued",
+        progress: 0,
+        message: "Upgrade aguardando aplicação na infraestrutura",
+        createdAt: now(),
+      });
+    }
     if (order.targetServiceId) {
       const service = store.get("services", order.targetServiceId);
       if (!service || service.ownerId !== order.ownerId)
@@ -147,6 +180,14 @@ export function createApplication(options = {}) {
     stripeClient: options.stripeClient,
     notify,
     queue,
+    coupons,
+    onVerifiedCard: (ownerId, fingerprint) =>
+      plans.linkCard(ownerId, fingerprint),
+    onCheckoutExpired: (order) => {
+      const s = store.get("services", order.targetServiceId);
+      if (s?.pendingUpgradeOrderId === order.id)
+        store.put("services", { ...s, pendingUpgradeOrderId: null });
+    },
   });
   const own = (kind, id, user) => {
     const item = store.get(kind, id);
@@ -278,8 +319,9 @@ export function createApplication(options = {}) {
       );
     if (input.referralCode && !affiliate)
       fail(400, "Código de indicação inválido.");
+    let result;
     try {
-      return {
+      result = {
         quote: quote(
           input,
           affiliate?.plan === "reseller" && planActive(affiliate.id, "reseller")
@@ -294,6 +336,8 @@ export function createApplication(options = {}) {
         "Recursos ou plano inválidos. Revise RAM, CPU, disco, região e ciclo.",
       );
     }
+    result.quote = coupons.apply(result.quote, input.couponCode, user.id);
+    return result;
   }
   async function handler(req, res) {
     securityHeaders(res, production);
@@ -314,7 +358,7 @@ export function createApplication(options = {}) {
         } catch {}
       });
     const send = (status, value) => {
-      if(res.destroyed||res.writableEnded)return;
+      if (res.destroyed || res.writableEnded) return;
       res.writeHead(status, {
         "Content-Type": "application/json; charset=utf-8",
         "Cache-Control": "no-store",
@@ -359,6 +403,12 @@ export function createApplication(options = {}) {
         return send(200, {
           ...publicRuntime(config),
           requireLogin: production || config.requireLogin === true,
+          plans: PLANS,
+          freeAvailable: production
+            ? Boolean(
+                launch?.status().provider?.freeTier && config.serviceDomain,
+              )
+            : true,
           categories: production
             ? launch?.status().provider?.categories || []
             : Object.keys(TABLE.types),
@@ -519,6 +569,7 @@ export function createApplication(options = {}) {
           stripeConfigured: billing.configured,
           production,
           canCheckout: production ? launch.canCharge(user.id) : true,
+          canStartFree: production ? launch.canStartFree(user.id) : true,
         });
       if (path === "/api/admin/launch" && req.method === "GET")
         return send(200, {
@@ -562,6 +613,13 @@ export function createApplication(options = {}) {
         if (!production) fail(400, "Disponível em produção.");
         return send(200, await billing.cancelRenewal(order));
       }
+      if (path === "/api/admin/coupons" && req.method === "GET")
+        return send(200, coupons.report());
+      if (path === "/api/admin/coupons" && req.method === "POST")
+        return send(201, coupons.save(await body(req)));
+      const couponMatch = path.match(/^\/api\/admin\/coupons\/([^/]+)$/);
+      if (couponMatch && req.method === "PATCH")
+        return send(200, coupons.save(await body(req), couponMatch[1]));
       if (path === "/api/pricing" && req.method === "GET")
         return send(200, TABLE);
       if (path === "/api/policy" && req.method === "GET")
@@ -628,6 +686,33 @@ export function createApplication(options = {}) {
               }),
             ),
         );
+      if (path === "/api/pending-orders" && req.method === "GET")
+        return send(
+          200,
+          store
+            .all("orders")
+            .filter(
+              (o) =>
+                o.ownerId === user.id &&
+                o.paymentMode === "stripe" &&
+                o.status === "awaiting-payment",
+            )
+            .map(({ id, name, quote, kind }) => ({ id, name, quote, kind })),
+        );
+      const resumeMatch = path.match(
+        /^\/api\/orders\/([^/]+)\/resume-checkout$/,
+      );
+      if (resumeMatch && req.method === "POST") {
+        const order = own("orders", resumeMatch[1], user);
+        if (
+          order.paymentMode !== "stripe" ||
+          order.status !== "awaiting-payment"
+        )
+          fail(409, "Checkout não está mais pendente.");
+        if (!limiter.allow(`resume:${user.id}`, 5))
+          fail(429, "Aguarde antes de retomar o checkout.");
+        return send(200, { order, ...(await billing.checkout(order)) });
+      }
       if (path === "/api/invoices" && req.method === "GET")
         return send(
           200,
@@ -671,17 +756,21 @@ export function createApplication(options = {}) {
         if (!limiter.allow(`orders:${user.id}`, 10))
           fail(429, "Máximo de 10 pedidos por minuto.");
         const input = await body(req);
+        const free = input.plan === "free";
         if (production) {
           if (!user.emailVerified)
             fail(403, "Confirme seu e-mail antes de comprar.");
-          if (input.paymentMode !== "stripe")
-            fail(400, "Pedidos de demonstração são proibidos em produção.");
+          if (input.paymentMode !== (free ? "free" : "stripe"))
+            fail(
+              400,
+              "Selecione o modo de contratação correto para este plano.",
+            );
           if (input.acceptedLegalVersion !== LEGAL_VERSION)
             fail(
               400,
               "Leia e aceite os Termos, Privacidade e Reembolso antes da compra.",
             );
-          if (!launch.canCharge(user.id))
+          if (free ? !launch.canStartFree(user.id) : !launch.canCharge(user.id))
             fail(
               503,
               "Contratações ainda não liberadas. Entre em contato com o suporte.",
@@ -715,13 +804,50 @@ export function createApplication(options = {}) {
             job: store.all("jobs").find((j) => j.orderId === previous.id),
           });
         }
-        if (!["stripe", "demo"].includes(input.paymentMode))
+        if (
+          !["stripe", "demo", "free"].includes(input.paymentMode) ||
+          free !== (input.paymentMode === "free")
+        )
           fail(400, "Escolha demo ou stripe test mode.");
         if (input.paymentMode === "stripe" && !billing.configured)
           fail(503, "Stripe test mode não configurado.");
         if (input.acceptedPolicy !== POLICY.version)
           fail(400, "Aceite a política de uso para continuar.");
         const { quote: q, affiliate } = calculate(input, user);
+        const upgrade = input.upgradeServiceId
+          ? own("services", input.upgradeServiceId, user)
+          : null;
+        if (upgrade) {
+          if (
+            !plans.isFree(upgrade) ||
+            free ||
+            ["Suspenso", "Cancelado"].includes(upgrade.status)
+          )
+            fail(
+              400,
+              "Somente serviços Free elegíveis podem fazer upgrade para planos pagos.",
+            );
+          if (!q.specs.plan) fail(400, "Selecione um plano pago para upgrade.");
+          if (upgrade.pendingUpgradeOrderId)
+            fail(
+              409,
+              "Há um upgrade pendente. Retome o pagamento original ou fale com o suporte.",
+            );
+          if (
+            q.specs.category !== upgrade.category ||
+            input.subtype !== upgrade.type ||
+            q.specs.region !== upgrade.quote.specs.region
+          )
+            fail(
+              400,
+              "O upgrade preserva a categoria, tecnologia e região originais.",
+            );
+          if (production && !launch.status().provider?.supportsResize)
+            fail(
+              503,
+              "A infraestrutura ainda não habilitou upgrade sem perda de dados.",
+            );
+        }
         if (production && !launch.supports(q.specs, input.subtype))
           fail(400, "Configuração ainda não disponível na infraestrutura.");
         if (input.expectedTotal !== q.total || input.priceVersion !== q.version)
@@ -752,24 +878,56 @@ export function createApplication(options = {}) {
         };
         if (!allowedTypes[q.specs.category].includes(input.subtype))
           fail(400, "Tecnologia incompatível com a categoria.");
-        const order = store.put("orders", {
-          id: randomUUID(),
-          ownerId: user.id,
-          name: input.name.trim(),
-          paymentMode: input.paymentMode,
-          subtype: input.subtype,
-          quote: q,
-          requestId: input.requestId,
-          referrerId: affiliate?.id || null,
-          uploadId: input.uploadId || null,
-          status: "awaiting-payment",
-          createdAt: now(),
-          policyVersion: POLICY.version,
-          customerEmail: production ? user.email : null,
-          legalAcceptance: production
-            ? { version: LEGAL_VERSION, date: now() }
-            : null,
+        const order = store.transaction(() => {
+          const order = store.put("orders", {
+            id: randomUUID(),
+            ownerId: user.id,
+            name: input.name.trim(),
+            paymentMode: input.paymentMode,
+            kind: upgrade ? "upgrade" : "create",
+            targetServiceId: upgrade?.id || null,
+            entitlements: entitlements(q.specs),
+            subtype: input.subtype,
+            quote: q,
+            requestId: input.requestId,
+            referrerId: affiliate?.id || null,
+            uploadId: input.uploadId || null,
+            status: "awaiting-payment",
+            createdAt: now(),
+            policyVersion: POLICY.version,
+            customerEmail: production ? user.email : null,
+            legalAcceptance: production
+              ? { version: LEGAL_VERSION, date: now() }
+              : null,
+          });
+          if (free) {
+            plans.claim(user, input, order);
+            const activated = store.put("orders", {
+              ...order,
+              status: "paid",
+              free: true,
+              freeRenewBy: freeState(q.specs, options.clock).renewBy,
+              platformHostname: production
+                ? `svc-${order.id}.${config.serviceDomain}`
+                : `svc-${order.id}.demo.invalid`,
+            });
+            queue(activated);
+            return activated;
+          }
+          coupons.reserve(order);
+          if (upgrade)
+            store.put("services", {
+              ...upgrade,
+              pendingUpgradeOrderId: order.id,
+            });
+          return order;
         });
+        if (free) {
+          return send(201, {
+            order,
+            job: store.all("jobs").find((j) => j.orderId === order.id),
+          });
+        }
         if (input.paymentMode === "stripe")
           return send(201, { order, ...(await billing.checkout(order)) });
         if (input.paymentMode !== "demo")
@@ -788,11 +946,81 @@ export function createApplication(options = {}) {
       if (path.startsWith("/api/jobs/") && req.method === "GET")
         return send(200, own("jobs", path.split("/")[3], user));
       const serviceMatch = path.match(
-        /^\/api\/services\/([^/]+)(?:\/(onboarding|action|addons|invitations|setup))?$/,
+        /^\/api\/services\/([^/]+)(?:\/(onboarding|action|addons|invitations|setup|renew-free|settings|backups))?$/,
       );
       if (serviceMatch) {
         const service = own("services", serviceMatch[1], user);
         const action = serviceMatch[2];
+        if (action === "renew-free" && req.method === "POST")
+          return send(200, await plans.renew(service));
+        if (action === "settings" && req.method === "PATCH") {
+          const input = await body(req),
+            rights = entitlements(service.quote.specs);
+          if (
+            ["Suspenso", "Cancelado", "Hibernado"].includes(service.status) ||
+            service.pendingUpgradeOrderId
+          )
+            fail(409, "Serviço indisponível ou upgrade pendente.");
+          const domain =
+            input.customDomain ?? service.settings?.customDomain ?? "";
+          const schedule =
+            input.backupSchedule ??
+            service.settings?.backupSchedule ??
+            "manual";
+          const slots =
+            input.slots ?? service.settings?.slots ?? rights.maxSlots;
+          if (
+            typeof domain !== "string" ||
+            domain.length > 253 ||
+            (domain &&
+              !/^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?\.[a-z]{2,}$/i.test(domain))
+          )
+            fail(400, "Domínio inválido.");
+          if (
+            !["manual", "daily", "weekly"].includes(schedule) ||
+            !Number.isInteger(slots) ||
+            slots < 0 ||
+            slots > rights.maxSlots
+          )
+            fail(400, "Agenda de backup ou slots inválidos para o plano.");
+          if (
+            (domain && !rights.customDomain) ||
+            (schedule !== "manual" && !rights.automaticBackup)
+          )
+            fail(
+              403,
+              "Domínio customizado e backup automático exigem um plano pago.",
+            );
+          const settings = {
+            customDomain: domain.toLowerCase(),
+            backupSchedule: schedule,
+            slots,
+          };
+          if (production) {
+            if (!launch.status().provider?.features.settings)
+              fail(
+                503,
+                "Configurações ainda não suportadas pela infraestrutura.",
+              );
+            await provider.settings(service.id, settings);
+          }
+          return send(200, store.put("services", { ...store.get("services",service.id), settings }));
+        }
+        if (action === "backups" && req.method === "POST") {
+          if (!limiter.allow(`backup-service:${service.id}`, 1))
+            fail(429, "Aguarde um minuto para outro backup.");
+          if (["Suspenso", "Cancelado"].includes(service.status))
+            fail(403, "Serviço indisponível.");
+          if (production) {
+            if (!launch.status().provider?.features.backups)
+              fail(503, "Backups de serviço ainda não conectados.");
+            return send(202, await provider.backup(service.id));
+          }
+          return send(202, {
+            demo: true,
+            message: "Backup manual simulado; nenhum arquivo real foi copiado.",
+          });
+        }
         if (production && ["addons", "setup", "invitations"].includes(action))
           fail(404, "Função prevista para uma próxima atualização.");
         if (!action && req.method === "GET") {
@@ -818,10 +1046,9 @@ export function createApplication(options = {}) {
                 m.cpuPercent <= 100;
               const next = store.put("services", {
                 ...service,
-                status:
-                  ['Suspenso','Cancelado'].includes(service.status)
-                    ? service.status
-                    : statuses[state.status],
+                status: ["Suspenso", "Cancelado"].includes(service.status)
+                  ? service.status
+                  : statuses[state.status],
                 metricsAvailable: Boolean(available),
                 cpu: available ? m.cpuPercent : 0,
                 ram: available ? m.ramGB : 0,
@@ -842,6 +1069,8 @@ export function createApplication(options = {}) {
         }
         if (action === "setup" && req.method === "PATCH") {
           const input = await body(req);
+          if (plans.isFree(service))
+            fail(403, "O Free só permite o subdomínio da plataforma.");
           if (
             typeof input.address !== "string" ||
             input.address.length > 253 ||
@@ -934,25 +1163,35 @@ export function createApplication(options = {}) {
               input.name.length > 80)
           )
             fail(400, "Nome inválido.");
-          if(production&&input.action!=='rename'&&store.get('orders',service.orderId)?.subscriptionStatus==='cancelled')fail(403,'A assinatura deste serviço foi encerrada.');
+          if (["start", "restart"].includes(input.action))
+            plans.canStart(service);
+          if (
+            production &&
+            input.action !== "rename" &&
+            store.get("orders", service.orderId)?.subscriptionStatus ===
+              "cancelled"
+          )
+            fail(403, "A assinatura deste serviço foi encerrada.");
           if (production && input.action !== "rename")
             await provider.action(service.id, input.action);
+          const latest = store.get("services", service.id);
           return send(
             200,
             store.put("services", {
-              ...service,
+              ...latest,
               status:
                 input.action === "stop"
                   ? "Offline"
                   : input.action === "rename"
-                    ? service.status
+                    ? latest.status
                     : "Online",
-              name:
-                input.action === "rename" ? input.name.trim() : service.name,
+              name: input.action === "rename" ? input.name.trim() : latest.name,
             }),
           );
         }
         if (action === "addons" && req.method === "POST") {
+          if (plans.isFree(service))
+            fail(403, "Faça upgrade para contratar adicionais.");
           const input = await body(req);
           if (input.confirm && typeof input.requestId === "string") {
             const previous = store
@@ -1255,7 +1494,7 @@ export function createApplication(options = {}) {
         );
         store.put("telemetry", { ...input, id: service.id, updatedAt: now() });
         if (suspicious && service.status !== "Suspenso") {
-          if(production)await provider.action(service.id,'stop');
+          if (production) await provider.action(service.id, "stop");
           store.put("services", {
             ...service,
             status: "Suspenso",
@@ -1340,6 +1579,10 @@ export function createApplication(options = {}) {
       .filter((j) => ["queued", "running"].includes(j.status))) {
       try {
         const order = store.get("orders", job.orderId);
+        if (job.kind === "upgrade") {
+          track(plans.upgradeTick(job, order)).catch(() => {});
+          continue;
+        }
         if (!order || order.status !== "paid")
           throw new Error("Pedido sem pagamento confirmado.");
         if (
@@ -1398,6 +1641,8 @@ export function createApplication(options = {}) {
             address: `${job.serviceId.slice(0, 8)}.demo.invalid`,
             cost: order.quote.monthlyEquivalent / 100,
             quote: order.quote,
+            entitlements: entitlements(specs),
+            freeTier: freeState(specs, options.clock),
             isolation: isolationProfile(specs, job.serviceId),
             demo: true,
             createdAt: now(),
@@ -1445,6 +1690,7 @@ export function createApplication(options = {}) {
     notify,
     instanceId,
     fetchPublic: options.fetchPublic,
+    plans,
   });
   const jobTimer = setInterval(
     () => (production ? track(launch.tick()).catch(() => {}) : tickJobs()),
@@ -1457,9 +1703,13 @@ export function createApplication(options = {}) {
     60 * 60 * 1000,
   );
   payoutTimer.unref();
-  const mailTimer = setInterval(() => track(mail.flush()).catch(() => {}), 10000);
+  const mailTimer = setInterval(
+    () => track(mail.flush()).catch(() => {}),
+    10000,
+  );
   mailTimer.unref();
   const opsTimer = setInterval(() => {
+    track(plans.lifecycle()).catch(() => {});
     if (production) {
       track(backups.run()).catch(() => {});
       track(launch.probe()).catch(() => {});
@@ -1477,7 +1727,7 @@ export function createApplication(options = {}) {
   server.headersTimeout = 10000;
   server.maxHeadersCount = 100;
   server.once("listening", () => {
-    if (production && options.background!==false) {
+    if (production && options.background !== false) {
       track(backups.run().then(() => launch.probe())).catch(() => {});
     }
   });
@@ -1485,6 +1735,8 @@ export function createApplication(options = {}) {
     server,
     store,
     billing,
+    plans,
+    coupons,
     tickJobs,
     handler,
     config,
@@ -1493,12 +1745,15 @@ export function createApplication(options = {}) {
     backups,
     launch,
     async close() {
-      if(closing)return;closing=true;mail.stop();launch.stop();
+      if (closing) return;
+      closing = true;
+      mail.stop();
+      launch.stop();
       clearInterval(jobTimer);
       clearInterval(payoutTimer);
       clearInterval(mailTimer);
       clearInterval(opsTimer);
-      await new Promise(resolve=>server.close(resolve));
+      await new Promise((resolve) => server.close(resolve));
       await Promise.allSettled([...pending]);
       store.close();
     },
