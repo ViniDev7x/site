@@ -30,7 +30,7 @@ O último comando abre um ambiente isolado para testar cadastro, confirmação d
 
 ## Colocar na internet
 
-Siga [LAUNCH.md](LAUNCH.md). O caminho recomendado é criar um projeto Railway, enviar este código atualizado, adicionar volume `/data`, variáveis seguras e gerar o domínio HTTPS do Railway. O repositório GitHub não foi atualizado automaticamente por esta entrega.
+Siga [LAUNCH.md](LAUNCH.md). O caminho recomendado é criar um projeto Railway, enviar este código atualizado, adicionar volume `/data`, variáveis seguras e gerar o domínio HTTPS do Railway. O código está na branch `main` de `ViniDev7x/site`; enviar o código ao GitHub não publica o site automaticamente.
 
 Também faltam: Stripe ativado, domínio remetente no Resend, bucket S3 para backups e infraestrutura/provisionador real para os serviços dos clientes. Railway hospeda a aplicação; ele não cria automaticamente uma operação de hospedagem de jogos, bots e sites.
 

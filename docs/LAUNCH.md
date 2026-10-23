@@ -10,7 +10,7 @@ Sem gateway e infraestrutura não existe serviço real a ser vendido. Não habil
 
 ## Caminho recomendado: Railway para a aplicação
 
-1. Crie a conta/projeto em https://railway.com/ e conecte **este código atualizado**. Os arquivos desta tarefa não foram enviados automaticamente ao GitHub. Railway usa `Dockerfile` e `railway.json`.
+1. Crie a conta/projeto em https://railway.com/ e conecte **este código atualizado**. Use a branch `main` atualizada de `ViniDev7x/site`; o envio ao GitHub não efetua o deploy. Railway usa `Dockerfile` e `railway.json`.
 2. Crie um volume persistente montado em `/data`, uma única réplica e limite de pelo menos 1 GB de RAM. O banco SQLite/WAL não deve ficar no filesystem efêmero. Este release não suporta múltiplas instâncias simultâneas da API.
 3. Cadastre as variáveis de `.env.production.example` nos campos seguros do Railway. Nunca use `.env` de desenvolvimento nem cole chaves no chat. Preencha a identificação legal real. Gere cada segredo de aplicação, backup e administração separadamente, por exemplo com `openssl rand -hex 32`, e guarde-os fora do código.
 4. Gere o domínio padrão do Railway. Ele fornece HTTPS gerenciado; use-o como `APP_ORIGIN` inicial. O endereço exato só existe após criar o serviço e não pode ser inventado nesta tarefa.
@@ -67,7 +67,7 @@ Não usamos dados de cartão no backend. A conta Stripe precisa tratar fraude/SC
 
 ## Monitoramento externo e alerta
 
-O workflow `.github/workflows/uptime.yml` está preparado, mas **não está ativado enquanto o código não estiver no GitHub e as configurações não forem salvas**. Nas configurações do repositório, cadastre variável `PUBLIC_URL` (origem HTTPS) e segredo `UPTIME_ALERT_WEBHOOK` (por exemplo webhook privado de canal Discord). O nome de usuário `vnpsyco` não fornece um webhook.
+O workflow `.github/workflows/uptime.yml` acompanha o código no GitHub, mas **a verificação fica desativada enquanto `PUBLIC_URL` não estiver configurada**. Nas configurações do repositório, cadastre variável `PUBLIC_URL` (origem HTTPS) e segredo `UPTIME_ALERT_WEBHOOK` (por exemplo webhook privado de canal Discord). O nome de usuário `vnpsyco` não fornece um webhook.
 
 O workflow usa checkout fixado por commit, verifica `/`, `/api/health`, `/api/ready` aproximadamente a cada 5 minutos e envia alerta nas falhas. Confirme o alerta real com indisponibilidade controlada e restaure o serviço. Agendamentos do GitHub podem atrasar; para exigência maior, use um monitor dedicado. Nunca rode somente um monitor na própria VPS: ele não detectaria a queda da máquina inteira. O script falha com status diferente de zero se o alerta não for entregue.
 
