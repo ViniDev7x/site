@@ -1,0 +1,1 @@
+{"Rules":[{"ID":"platform-30-day-retention","Status":"Enabled","Filter":{"Prefix":"platform/"},"Expiration":{"Days":30},"NoncurrentVersionExpiration":{"NoncurrentDays":30},"AbortIncompleteMultipartUpload":{"DaysAfterInitiation":1}}]}

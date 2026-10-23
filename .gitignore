@@ -1,0 +1,17 @@
+node_modules
+dist
+*.log
+.local/
+.env
+.env.*
+!.env.example
+test-results/
+.data/
+backups/
+!.env.production.example
+
+# Bancos, backups e chaves locais nunca devem ser publicados.
+*.sqlite*
+*.enc
+*.pem
+*.key

@@ -1,0 +1,10 @@
+import { createApplication } from './app.js';
+import { existsSync } from 'node:fs';
+if(process.env.NODE_ENV!=='production'&&existsSync('.env'))process.loadEnvFile('.env');
+const production=process.env.NODE_ENV==='production';
+const port=Number(production?process.env.PORT||3000:process.env.API_PORT||3001);
+if(!Number.isInteger(port)||port<1||port>65535)throw new Error('PORT/API_PORT inválida.');
+const app=createApplication();
+app.server.listen(port,production?'0.0.0.0':'127.0.0.1',()=>console.log(`Nexora: ${production?'produção':'desenvolvimento'} na porta ${port}. Nenhum segredo é exibido nos logs.`));
+let closing=false;
+for(const event of ['SIGINT','SIGTERM'])process.on(event,()=>{if(closing)return;closing=true;app.close().then(()=>process.exit(0));});

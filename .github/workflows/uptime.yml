@@ -1,0 +1,22 @@
+name: Uptime de produção
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: nexora-uptime
+  cancel-in-progress: true
+jobs:
+  check:
+    if: ${{ vars.PUBLIC_URL != '' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - name: Verificar site e API e enviar alerta
+        env:
+          PUBLIC_URL: ${{ vars.PUBLIC_URL }}
+          UPTIME_ALERT_WEBHOOK: ${{ secrets.UPTIME_ALERT_WEBHOOK }}
+        run: node scripts/monitor.mjs

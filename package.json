@@ -1,0 +1,35 @@
+{
+  "name": "nexora-host",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "api": "node server/index.js",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "node --test test/*.test.js",
+    "test:e2e": "node test/e2e/dayone.cjs",
+    "start": "node scripts/start.mjs",
+    "test:e2e:legacy": "node test/e2e/features.cjs",
+    "monitor": "node scripts/monitor.mjs",
+    "backup:restore": "node scripts/restore.mjs"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.1156.0",
+    "fflate": "^0.8.3",
+    "lucide-react": "^0.468.0",
+    "proxy-addr": "^2.0.8",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "resend": "^6.34.1",
+    "stripe": "^23.0.1"
+  },
+  "devDependencies": {
+    "playwright": "^1.64.1",
+    "vite": "^6.3.0"
+  },
+  "engines": {
+    "node": ">=22.13"
+  }
+}

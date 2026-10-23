@@ -1,0 +1,12 @@
+.git
+node_modules
+dist
+.local
+.data
+backups
+test-results
+.env
+.env.*
+*.sqlite*
+*.enc
+*.log
